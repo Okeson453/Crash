@@ -1,37 +1,66 @@
+/**
+ * AdminScreen — tab shell for authorized administrators.
+ * Each tab is a dedicated screen under screens/admin/.
+ * Frontend visibility is not the security boundary; RBAC is enforced server-side.
+ */
 import { useState } from 'react';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAdminUsers, getAuditLogs, getAdminSessionState, startGameSession, pauseGameSession, resumeGameSession, stopGameSession, emergencyStop, getAdminConfig, updateAdminConfig } from '@/api/admin';
-import { getHealthStatus } from '@/api/health';
-import { formatDateTime } from '@/utils/formatting';
-import { Users, ClipboardList, Activity, Settings, HeartPulse } from 'lucide-react';
-import { Tabs } from '@/components/ui/Tabs';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
-import { LoadingSpinner } from '@/components/ui/Spinner';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { useAuth } from '@/hooks/useAuth';
+import { Tabs } from '@/components/ui/Tabs';
+import { Card } from '@/components/ui/Card';
+import { AdminOverviewScreen } from './admin/AdminOverviewScreen';
+import { AdminUsersScreen } from './admin/AdminUsersScreen';
+import { AdminEnginesScreen } from './admin/AdminEnginesScreen';
+import { AdminConfigScreen } from './admin/AdminConfigScreen';
+import { AdminHealthScreen } from './admin/AdminHealthScreen';
+import { AdminAuditScreen } from './admin/AdminAuditScreen';
+import { AdminTenantScreen } from './admin/AdminTenantScreen';
+import { AdminBillingScreen } from './admin/AdminBillingScreen';
+import { AdminComplianceScreen } from './admin/AdminComplianceScreen';
+import { AdminIntegrationsScreen } from './admin/AdminIntegrationsScreen';
+import { AdminReferralsScreen } from './admin/AdminReferralsScreen';
 
 const tabs = [
-  { id: 'overview', label: 'Overview' }, { id: 'users', label: 'Users' }, { id: 'engines', label: 'Engines' },
-  { id: 'config', label: 'Configuration' }, { id: 'health', label: 'System Health' }, { id: 'audit', label: 'Audit Logs' },
+  { id: 'overview', label: 'Overview' },
+  { id: 'users', label: 'Users' },
+  { id: 'engines', label: 'Engines' },
+  { id: 'config', label: 'Config' },
+  { id: 'health', label: 'Health' },
+  { id: 'audit', label: 'Audit' },
+  { id: 'tenant', label: 'Tenant' },
+  { id: 'billing', label: 'Billing' },
+  { id: 'referrals', label: 'Referrals' },
+  { id: 'compliance', label: 'Compliance' },
+  { id: 'integrations', label: 'Integrations' },
 ];
 
 export function AdminScreen() {
   const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
-  if (!isAdmin) return <main className="p-4"><Card><p className="text-sm text-tg-text">Administrator access is required.</p></Card></main>;
-  return <div className="page-container px-4 py-4 space-y-4"><Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} />{activeTab === 'overview' && <Overview />}{activeTab === 'users' && <UsersPanel />}{activeTab === 'engines' && <EnginesPanel />}{activeTab === 'config' && <ConfigPanel />}{activeTab === 'health' && <HealthPanel />}{activeTab === 'audit' && <AuditPanel />}</div>;
+
+  if (!isAdmin) {
+    return (
+      <main className="p-4">
+        <Card>
+          <p className="text-sm text-tg-text">Administrator access is required.</p>
+        </Card>
+      </main>
+    );
+  }
+
+  return (
+    <div className="page-container px-4 py-4 space-y-4">
+      <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} />
+      {activeTab === 'overview' && <AdminOverviewScreen />}
+      {activeTab === 'users' && <AdminUsersScreen />}
+      {activeTab === 'engines' && <AdminEnginesScreen />}
+      {activeTab === 'config' && <AdminConfigScreen />}
+      {activeTab === 'health' && <AdminHealthScreen />}
+      {activeTab === 'audit' && <AdminAuditScreen />}
+      {activeTab === 'tenant' && <AdminTenantScreen />}
+      {activeTab === 'billing' && <AdminBillingScreen />}
+      {activeTab === 'referrals' && <AdminReferralsScreen />}
+      {activeTab === 'compliance' && <AdminComplianceScreen />}
+      {activeTab === 'integrations' && <AdminIntegrationsScreen />}
+    </div>
+  );
 }
-
-function Overview() { const session = useQuery({ queryKey: ['admin-session'], queryFn: getAdminSessionState, refetchInterval: 5000 }); const health = useQuery({ queryKey: ['health'], queryFn: getHealthStatus, refetchInterval: 15000 }); if (session.isLoading || health.isLoading) return <LoadingSpinner size="lg" />; return <div className="grid grid-cols-2 gap-3"><Card><p className="text-xs text-tg-hint">Engine</p><p className="mt-1 font-bold text-tg-text">{session.data?.status ?? 'unknown'}</p></Card><Card><p className="text-xs text-tg-hint">Mode</p><p className="mt-1 font-bold text-tg-text">{session.data?.mode ?? 'unknown'}</p></Card><Card><p className="text-xs text-tg-hint">Rounds</p><p className="mt-1 font-bold text-tg-text">{session.data?.totalRounds ?? 0}</p></Card><Card><p className="text-xs text-tg-hint">System</p><p className="mt-1 font-bold text-tg-text">{health.data?.status ?? 'unknown'}</p></Card></div>; }
-
-function EnginesPanel() { const queryClient = useQueryClient(); const session = useQuery({ queryKey: ['admin-session'], queryFn: getAdminSessionState, refetchInterval: 5000 }); const mutation = useMutation({ mutationFn: (action: string) => action === 'start' ? startGameSession() : action === 'pause' ? pauseGameSession() : action === 'resume' ? resumeGameSession() : action === 'stop' ? stopGameSession() : emergencyStop(), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['admin-session'] }); } }); const actions = [['start','Start'],['pause','Pause'],['resume','Resume'],['stop','Stop'],['emergency','Emergency stop']]; return <Card className="space-y-4"><div><p className="text-xs text-tg-hint">Current state</p><p className="text-lg font-bold text-tg-text">{session.data?.status ?? 'loading'}</p></div><div className="grid grid-cols-2 gap-2">{actions.map(([id,label]) => <Button key={id} variant={id === 'emergency' ? 'destructive' : 'secondary'} loading={mutation.isPending} onClick={() => mutation.mutate(id)}>{label}</Button>)}</div>{mutation.error && <p role="alert" className="text-sm text-crash-red">{mutation.error instanceof Error ? mutation.error.message : 'Operation failed'}</p>}</Card>; }
-
-function ConfigPanel() { const client = useQueryClient(); const query = useQuery({ queryKey: ['admin-config'], queryFn: getAdminConfig }); const mutation = useMutation({ mutationFn: updateAdminConfig, onSuccess: () => { void client.invalidateQueries({ queryKey: ['admin-config'] }); } }); if (query.isLoading) return <LoadingSpinner size="lg" />; if (!query.data) return <EmptyState title="Configuration unavailable" />; const config = query.data; return <Card className="space-y-3"><p className="font-semibold text-tg-text">Execution configuration</p><p className="text-sm text-tg-hint">Stake: {config.stakePerEntry} · Target: {config.cashOutTarget}x · Daily entries: {config.maxDailyEntries}</p><Button loading={mutation.isPending} onClick={() => mutation.mutate({ mode: config.mode })}>Save current configuration</Button></Card>; }
-
-function HealthPanel() { const query = useQuery({ queryKey: ['health'], queryFn: getHealthStatus, refetchInterval: 10000 }); if (query.isLoading) return <LoadingSpinner size="lg" />; if (!query.data) return <EmptyState title="Health unavailable" />; return <div className="space-y-2">{query.data.checks.map((check) => <Card key={check.name} className="flex items-center gap-3"><HeartPulse className="h-5 w-5 text-tg-link" /><div className="flex-1"><p className="text-sm font-medium text-tg-text">{check.name}</p><p className="text-xs text-tg-hint">{check.message}</p></div><Badge variant={check.status === 'ok' ? 'success' : check.status === 'degraded' ? 'warning' : 'danger'}>{check.status}</Badge></Card>)}</div>; }
-
-function UsersPanel() { const query = useInfiniteQuery({ queryKey: ['admin-users'], queryFn: ({ pageParam }: { pageParam: string | undefined }) => getAdminUsers(pageParam), getNextPageParam: (lastPage) => lastPage.pagination.cursor ?? undefined, initialPageParam: undefined as string | undefined }); const users = query.data?.pages.flatMap((page) => page.data) ?? []; if (query.isLoading) return <LoadingSpinner size="lg" />; if (!users.length) return <EmptyState icon={Users} title="No users found" />; return <div className="space-y-2">{users.map((user) => <Card key={user.id} className="flex items-center justify-between py-3"><div><p className="text-sm font-semibold text-tg-text">{user.firstName} {user.lastName}</p><p className="text-xs text-tg-hint">@{user.telegramUsername || 'no-username'} · {user.role}</p></div><Badge variant={user.status === 'active' ? 'success' : user.status === 'suspended' ? 'warning' : 'danger'}>{user.status}</Badge></Card>)}{query.hasNextPage && <Button className="w-full" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Load more</Button>}</div>; }
-
-function AuditPanel() { const query = useInfiniteQuery({ queryKey: ['admin-audit'], queryFn: ({ pageParam }: { pageParam: string | undefined }) => getAuditLogs(pageParam), getNextPageParam: (lastPage) => lastPage.pagination.cursor ?? undefined, initialPageParam: undefined as string | undefined }); const logs = query.data?.pages.flatMap((page) => page.data) ?? []; if (query.isLoading) return <LoadingSpinner size="lg" />; if (!logs.length) return <EmptyState icon={ClipboardList} title="No audit logs" />; return <div className="space-y-2">{logs.map((log) => <Card key={log.id}><div className="flex items-start gap-3"><Activity className="h-5 w-5 text-tg-link" /><div className="flex-1"><p className="text-sm font-medium text-tg-text">{log.action}</p><p className="text-xs text-tg-hint">{log.actorType} · {formatDateTime(log.createdAt)}</p></div><Settings className="h-4 w-4 text-tg-hint" /></div></Card>)}{query.hasNextPage && <Button className="w-full" loading={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>Load more</Button>}</div>; }

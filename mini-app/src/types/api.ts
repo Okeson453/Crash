@@ -184,6 +184,7 @@ export interface AdminSessionState {
   totalBets: number;
   totalPnl: number;
   lastError: string | null;
+  currentRoundId?: string;
   healthChecks: Array<{
     component: string;
     status: 'ok' | 'degraded' | 'failing';
@@ -352,3 +353,129 @@ export interface Plan {
   features: string[];
   isPopular?: boolean;
 }
+
+// === Admin Overview & extended admin types (design upgrade) ===
+
+export interface AdminOverview {
+  totalRounds: number;
+  activePlayers: number;
+  revenue24h: number;
+  profit24h: number;
+  totalBets: number;
+  totalPnl: number;
+  revenueChart: Array<{ label: string; value: number }>;
+  latestAlerts: Array<{ name: string; status: 'ok' | 'degraded' | 'failing'; message: string }>;
+}
+
+export interface AdminActivity {
+  id: string;
+  type: 'bet' | 'cashout' | 'crash' | 'start' | 'stop' | 'pause' | 'resume' | 'emergency';
+  message: string;
+  createdAt: string;
+}
+
+export interface TenantIdentity {
+  displayName: string;
+  slug: string;
+  description: string;
+}
+
+export interface TenantBranding {
+  logoUrl: string;
+  primaryColor: string;
+  accentColor: string;
+}
+
+export interface TenantLimits {
+  currency: string;
+  minBet: number;
+  maxBet: number;
+  maxDailyWager: number;
+}
+
+export interface TenantSettings {
+  identity: TenantIdentity;
+  branding: TenantBranding;
+  limits: TenantLimits;
+}
+
+export interface Subscription {
+  id: string;
+  planName: string;
+  price: string;
+  status: 'active' | 'cancelled' | 'past_due' | 'trialing';
+  renewsAt: string;
+  startedAt: string;
+}
+
+export interface UsageMetrics {
+  apiCalls: number;
+  apiCallsLimit: number;
+  players: number;
+  playersLimit: number;
+  rounds: number;
+  roundsLimit: number;
+}
+
+export interface Invoice {
+  id: string;
+  period: string;
+  amount: number;
+  status: 'paid' | 'pending' | 'failed';
+  createdAt: string;
+  pdfUrl?: string;
+}
+
+export interface RgSettings {
+  betCooldownMinutes: number;
+  maxLossPerDay: number;
+  maxSessionHours: number;
+}
+
+export interface SelfExclusion {
+  id: string;
+  userId: string;
+  userName: string;
+  expiresAt: string;
+  isPermanent: boolean;
+  reason?: string;
+}
+
+export interface KycOverview {
+  verified: number;
+  pending: number;
+  rejected: number;
+  total: number;
+}
+
+export interface TelegramBotStatus {
+  botName: string;
+  isConnected: boolean;
+  webhookUrl: string | null;
+  lastPingAt: string | null;
+}
+
+export interface WebhookEndpoints {
+  betEvents: string;
+  roundEvents: string;
+  userEvents: string;
+}
+
+export interface ConnectedService {
+  name: string;
+  status: 'connected' | 'disconnected' | 'error';
+  lastCheckedAt: string;
+}
+
+export interface ReferralAdminOverview {
+  totalReferrals: number;
+  qualifiedReferrals: number;
+  pendingReferrals: number;
+  conversionRate: number;
+  rewardsIssued: number;
+  rewardsPending: number;
+  rewardsExpired: number;
+  rewardsRevoked: number;
+  topReferrers: Array<{ userId: string; username?: string; qualifiedCount: number }>;
+}
+
