@@ -17,6 +17,7 @@ import { adminRoutes } from './routes/admin';
 import { analyticsRoutes } from './routes/analytics';
 import { healthRoutes } from './routes/health';
 import { plansRoutes } from './routes/plans';
+import { referralsRoutes } from './routes/referrals';
 
 export async function createApiServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -64,6 +65,7 @@ export async function createApiServer(): Promise<FastifyInstance> {
   await fastify.register(betsRoutes, { prefix: '/api/v1/bets' });
   await fastify.register(usersRoutes, { prefix: '/api/v1/users' });
   await fastify.register(adminRoutes, { prefix: '/api/v1/admin' });
+  await fastify.register(referralsRoutes, { prefix: '/api/v1/referrals' });
   await fastify.register(analyticsRoutes, { prefix: '/api/v1/analytics' });
   await fastify.register(plansRoutes, { prefix: '/api/v1/plans' });
 

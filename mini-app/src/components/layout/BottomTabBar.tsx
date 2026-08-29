@@ -3,6 +3,7 @@ import {
   Gamepad2,
   LayoutDashboard,
   History,
+  Gift,
   Shield,
   BarChart3,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ const TABS: TabItem[] = [
   { path: '/', label: 'Game', icon: Gamepad2 },
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/history', label: 'History', icon: History },
+  { path: '/referrals', label: 'Referrals', icon: Gift },
 ];
 
 const OPERATOR_TABS: TabItem[] = [

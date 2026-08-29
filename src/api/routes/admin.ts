@@ -93,4 +93,137 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       },
     });
   });
+
+  // === Design-concept admin extensions (stubs with safe defaults) ===
+
+  fastify.get('/overview', async (_request, reply) => {
+    reply.send({
+      data: {
+        totalRounds: 0,
+        activePlayers: 0,
+        revenue24h: 0,
+        profit24h: 0,
+        totalBets: 0,
+        totalPnl: 0,
+        revenueChart: [],
+        latestAlerts: [],
+      },
+    });
+  });
+
+  fastify.post('/users/:id/suspend', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    reply.send({ data: { id, status: 'suspended' } });
+  });
+
+  fastify.post('/users/:id/unsuspend', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    reply.send({ data: { id, status: 'active' } });
+  });
+
+  fastify.put('/users/:id/role', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({ role: z.enum(['player', 'operator', 'admin']) }).parse(request.body);
+    reply.send({ data: { id, role: body.role } });
+  });
+
+  fastify.get('/activity', async (_request, reply) => {
+    reply.send({ data: [] });
+  });
+
+  fastify.get('/rounds', async (request, reply) => {
+    const query = paginationSchema.parse(request.query);
+    reply.send({
+      data: [],
+      pagination: { cursor: null, hasMore: false, limit: query.limit },
+    });
+  });
+
+  fastify.get('/tenant', async (_request, reply) => {
+    reply.send({
+      data: {
+        identity: { displayName: 'CrashWave', slug: 'crashwave', description: '' },
+        branding: { logoUrl: '', primaryColor: '#2481cc', accentColor: '#22c55e' },
+        limits: { currency: 'USD', minBet: 1, maxBet: 10000, maxDailyWager: 100000 },
+      },
+    });
+  });
+
+  fastify.get('/billing/subscription', async (_request, reply) => {
+    reply.send({ data: null });
+  });
+
+  fastify.get('/billing/usage', async (_request, reply) => {
+    reply.send({
+      data: {
+        apiCalls: 0,
+        apiCallsLimit: 100000,
+        players: 0,
+        playersLimit: 1000,
+        rounds: 0,
+        roundsLimit: 100000,
+      },
+    });
+  });
+
+  fastify.get('/billing/invoices', async (_request, reply) => {
+    reply.send({ data: [] });
+  });
+
+  fastify.get('/compliance/rg', async (_request, reply) => {
+    reply.send({
+      data: { betCooldownMinutes: 0, maxLossPerDay: 0, maxSessionHours: 24 },
+    });
+  });
+
+  fastify.get('/compliance/self-exclusion', async (_request, reply) => {
+    reply.send({ data: [] });
+  });
+
+  fastify.get('/compliance/kyc', async (_request, reply) => {
+    reply.send({ data: { verified: 0, pending: 0, rejected: 0, total: 0 } });
+  });
+
+  fastify.get('/integrations/telegram', async (_request, reply) => {
+    reply.send({
+      data: {
+        botName: 'crashwave_bot',
+        isConnected: false,
+        webhookUrl: null,
+        lastPingAt: null,
+      },
+    });
+  });
+
+  fastify.get('/integrations/webhooks', async (_request, reply) => {
+    reply.send({
+      data: { betEvents: '', roundEvents: '', userEvents: '' },
+    });
+  });
+
+  fastify.get('/integrations/services', async (_request, reply) => {
+    reply.send({
+      data: [
+        { name: 'postgresql', status: 'connected', lastCheckedAt: new Date().toISOString() },
+        { name: 'redis', status: 'connected', lastCheckedAt: new Date().toISOString() },
+        { name: 'telegram', status: 'disconnected', lastCheckedAt: new Date().toISOString() },
+      ],
+    });
+  });
+
+  fastify.get('/referrals/overview', async (_request, reply) => {
+    reply.send({
+      data: {
+        totalReferrals: 0,
+        qualifiedReferrals: 0,
+        pendingReferrals: 0,
+        conversionRate: 0,
+        rewardsIssued: 0,
+        rewardsPending: 0,
+        rewardsExpired: 0,
+        rewardsRevoked: 0,
+        topReferrers: [],
+      },
+    });
+  });
 }

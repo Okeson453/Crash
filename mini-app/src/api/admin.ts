@@ -17,6 +17,7 @@ import type {
   WebhookEndpoints,
   ConnectedService,
   ReferralAdminOverview,
+  AdminActivity,
 } from '@/types/api';
 
 export async function getAdminSessionState(): Promise<AdminSessionState> {
@@ -142,4 +143,15 @@ export async function getConnectedServices(): Promise<ConnectedService[]> {
 
 export async function getReferralAdminOverview(): Promise<ReferralAdminOverview> {
   return api.get<ReferralAdminOverview>('/api/v1/admin/referrals/overview');
+}
+
+export async function getAdminActivity(): Promise<AdminActivity[]> {
+  return api.get<AdminActivity[]>('/api/v1/admin/activity');
+}
+
+export async function getAdminRounds(
+  cursor?: string
+): Promise<PaginatedResponse<{ id: string; crashPoint?: number; betCount?: number; createdAt?: string }>> {
+  const params = cursor ? `?cursor=${cursor}` : '';
+  return api.get(`/api/v1/admin/rounds${params}`);
 }

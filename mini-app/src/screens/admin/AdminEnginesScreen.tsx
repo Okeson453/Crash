@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { getAdminSessionState } from '@/api/admin';
 import { SessionControlPanel } from '@/components/admin/SessionControlPanel';
+import { EngineMetrics } from '@/components/admin/EngineMetrics';
+import { LiveActivityFeed } from '@/components/admin/LiveActivityFeed';
+import { useAdminActivity } from '@/hooks/useAdminActivity';
 import { LoadingSpinner } from '@/components/ui/Spinner';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -11,6 +14,7 @@ export function AdminEnginesScreen() {
     queryFn: getAdminSessionState,
     refetchInterval: 5000,
   });
+  const { activities, isLoading: activityLoading } = useAdminActivity();
 
   if (session.isLoading) return <LoadingSpinner size="lg" />;
 
@@ -22,7 +26,7 @@ export function AdminEnginesScreen() {
     <div className="space-y-4">
       <Card className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold text-tg-text">Session Status</p>
+          <p className="text-sm font-semibold text-tg-text">Session status</p>
           <Badge variant={statusVariant}>{status}</Badge>
         </div>
         <p className="text-xs text-tg-hint">
@@ -32,7 +36,9 @@ export function AdminEnginesScreen() {
           <p className="text-xs text-tg-hint">Current round: {session.data.currentRoundId}</p>
         )}
       </Card>
+      <EngineMetrics session={session.data} />
       <SessionControlPanel />
+      {!activityLoading && <LiveActivityFeed activities={activities} />}
     </div>
   );
 }
