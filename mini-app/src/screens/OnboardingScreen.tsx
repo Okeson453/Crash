@@ -30,7 +30,7 @@ export function OnboardingScreen() {
   const navigate = useNavigate();
   const { login, isLoading } = useAuth();
   const { isAuthenticated } = useAuthStore();
-  const { isTelegram, user } = useTelegram();
+  const { isTelegram } = useTelegram();
   const completeOnboarding = useSettingsStore((s) => s.completeOnboarding);
 
   // Redirect if already authenticated — must be in useEffect, not during render

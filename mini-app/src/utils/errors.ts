@@ -21,8 +21,8 @@ export class NetworkError extends AppError {
 }
 
 export class AuthError extends AppError {
-  constructor(message = 'Authentication failed. Please log in again.') {
-    super(message, 'AUTH_ERROR', 401);
+  constructor(message = 'Authentication failed. Please log in again.', code = 'AUTH_ERROR') {
+    super(message, code, 401);
     this.name = 'AuthError';
   }
 }
@@ -56,15 +56,17 @@ export class ValidationError extends AppError {
 }
 
 export class RateLimitError extends AppError {
-  constructor(message = 'Too many requests. Please wait a moment.') {
+  public readonly retryAfter?: number;
+  constructor(message = 'Too many requests. Please wait a moment.', retryAfter?: number) {
     super(message, 'RATE_LIMIT', 429);
     this.name = 'RateLimitError';
+    this.retryAfter = retryAfter;
   }
 }
 
 export class ServerError extends AppError {
-  constructor(message = 'Server error. Please try again later.') {
-    super(message, 'SERVER_ERROR', 500);
+  constructor(message = 'Server error. Please try again later.', code = 'SERVER_ERROR', statusCode = 500) {
+    super(message, code, statusCode);
     this.name = 'ServerError';
   }
 }

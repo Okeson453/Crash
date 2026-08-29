@@ -130,7 +130,6 @@ export const useGameStore = create<GameStateStore>((set) => ({
     set({
       activeBet: null,
       activeBets: [null, null],
-  activeBets: [null, null],
       multiplier: null,
       crashPoint: null,
       betError: null,

@@ -7,6 +7,7 @@ import { useAuthContext } from '@/providers/AuthProvider';
 import { AuthLoadingScreen } from '@/screens/AuthLoadingScreen';
 import { NetworkErrorScreen } from '@/screens/NetworkErrorScreen';
 import { OnboardingScreen } from '@/screens/OnboardingScreen';
+import { MaintenanceScreen } from '@/screens/MaintenanceScreen';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { useEffect } from 'react';
 import { useUIStore } from '@/stores/uiStore';

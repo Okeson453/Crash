@@ -3,8 +3,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useGameStore } from '@/stores/gameStore';
 import { useUIStore } from '@/stores/uiStore';
 import { placeBet, cashoutBet } from '@/api/bets';
-import { useTelegram } from './useTelegram';
+import { useTelegram } from '@/hooks/useTelegram';
 import type { PlaceBetRequest } from '@/types/api';
+
+function createIdempotencyKey(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 export function useBet(index: 0 | 1 = 0) {
   const store = useGameStore();
@@ -13,7 +19,7 @@ export function useBet(index: 0 | 1 = 0) {
   const { haptic } = useTelegram();
 
   const placeBetMutation = useMutation({
-    mutationFn: placeBet,
+    mutationFn: (request: PlaceBetRequest) => placeBet(request, createIdempotencyKey()),
     onMutate: () => {
       store.setIsPlacingBet(true);
       store.clearErrors();

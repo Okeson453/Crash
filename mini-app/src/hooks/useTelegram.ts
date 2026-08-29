@@ -37,10 +37,11 @@ export function useTelegram() {
       if (!webApp?.HapticFeedback) return;
       try {
         switch (type) {
-          case 'impact':
+          case 'impact': {
             const style = value === 'light' || value === 'heavy' ? value : 'medium';
             webApp.HapticFeedback.impactOccurred(style);
             break;
+          }
           case 'notification':
             webApp.HapticFeedback.notificationOccurred(
               value === 'warning' || value === 'error' ? value : 'success'

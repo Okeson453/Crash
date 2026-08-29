@@ -25,13 +25,13 @@ export function GameScreen() {
   const betError = useGameStore((state) => state.betError);
   const cashoutError = useGameStore((state) => state.cashoutError);
   const { isLoading: balanceLoading } = useBalance();
-  const { useMainButton } = useTelegram();
+  const { useMainButton: bindMainButton } = useTelegram();
   const { canCashout, manualCashout } = useCashout();
   useRealtimeGame();
   useEffect(() => {
-    if (canCashout) return useMainButton('Cash Out', manualCashout, true);
-    return useMainButton('Place Bet', () => undefined, false);
-  }, [canCashout, manualCashout, useMainButton]);
+    if (canCashout) return bindMainButton('Cash Out', manualCashout, true);
+    return bindMainButton('Place Bet', () => undefined, false);
+  }, [canCashout, manualCashout, bindMainButton]);
 
   const showBetPanel = ui.canPlaceBet;
   const showCashout = ui.canCashout;
@@ -63,7 +63,7 @@ export function GameScreen() {
       {/* Bet Panel */}
       {ui.state === 'BET_FAILED' && <BetErrorDialog open message={betError ?? cashoutError ?? 'Bet failed'} onClose={() => useGameStore.getState().clearErrors()} />}
       {showBetPanel && (
-        balanceLoading ? <SkeletonCard /> : <BetPanel />
+        balanceLoading ? <SkeletonCard /> : <TwoBetPanel />
       )}
 
       {/* Live Feed */}
