@@ -287,20 +287,11 @@ export class ACIEEngine {
   private buildEvaluation(riskState?: Partial<StrategyRiskState>): ACIEEvaluationResult {
     const sequenceState = this.tpl.computeSequenceState(this.crashPoints);
     const regime = this.tpl.detectRegime(sequenceState);
-    const history = [...this.sol.getRecords()];
+    // Readonly view — no array copy on the hot path
+    const history = this.sol.getRecords();
 
-    const models = this.psi.estimateModels({
-      crashPoints: this.crashPoints,
-      sequenceState,
-      regime,
-      history,
-      ewmaHitRate: this.online.ewmaHitRate,
-    });
-    this.lastModelProbabilities = Object.fromEntries(
-      models.map((m) => [m.modelName, m.probability])
-    );
-
-    const psi = this.psi.estimate({
+    // Single PSI inference (models + ensemble) — previously ran twice
+    const { psi, models } = this.psi.estimateWithModels({
       crashPoints: this.crashPoints,
       sequenceState,
       regime,
@@ -308,6 +299,9 @@ export class ACIEEngine {
       ensembleWeights: this.online.ensembleWeights,
       ewmaHitRate: this.online.ewmaHitRate,
     });
+    this.lastModelProbabilities = Object.fromEntries(
+      models.map((m) => [m.modelName, m.probability])
+    );
 
     // Prefer latest heavy evidence; blend calibration error with online estimate
     const evidence = this.lastEvidence ?? this.lightweightEvidence();
