@@ -11,6 +11,7 @@ import { ConnectionStatus } from '@/components/dashboard/ConnectionStatus';
 import { LastUpdated } from '@/components/dashboard/LastUpdated';
 import { DataFreshnessIndicator } from '@/components/dashboard/DataFreshnessIndicator';
 import { useDashboardState } from '@/hooks/dashboard/useDashboardState';
+import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
   TrendingDown,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 
 export function DashboardScreen() {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const { balance, currencySymbol } = useBalance();
   const dashboard = useDashboardState();
@@ -48,6 +50,11 @@ export function DashboardScreen() {
           {currencySymbol}{(balance ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
         </p>
         <p className="text-xs text-tg-hint mt-1">{user?.planName || 'Free Plan'}</p>
+        <div className="mt-3 flex gap-2">
+          <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/wallet')}>Wallet</button>
+          <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/referrals')}>Referrals</button>
+          <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/notifications')}>Notifications</button>
+        </div>
       </div>
 
       {/* Stats Grid */}

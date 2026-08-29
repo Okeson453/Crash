@@ -20,6 +20,8 @@ import { AdminScreen } from '@/screens/AdminScreen';
 import { HealthScreen } from '@/screens/HealthScreen';
 import { SettingsSectionScreen } from '@/screens/settings/SettingsSectionScreen';
 import { ReferralsScreen } from '@/screens/ReferralsScreen';
+import { WalletScreen } from '@/screens/WalletScreen';
+import { NotificationsScreen } from '@/screens/NotificationsScreen';
 
 export function AppRouter() {
   return (
@@ -38,6 +40,8 @@ export function AppRouter() {
         <Route path="/settings/:section" element={<ErrorBoundary><SettingsSectionScreen /></ErrorBoundary>} />
         <Route path="/pricing" element={<ErrorBoundary><PricingScreen /></ErrorBoundary>} />
         <Route path="/referrals" element={<ErrorBoundary><ReferralsScreen /></ErrorBoundary>} />
+        <Route path="/wallet" element={<ErrorBoundary><WalletScreen /></ErrorBoundary>} />
+        <Route path="/notifications" element={<ErrorBoundary><NotificationsScreen /></ErrorBoundary>} />
         <Route path="/verify/:roundId" element={<ErrorBoundary><VerifyScreen /></ErrorBoundary>} />
       </Route>
 

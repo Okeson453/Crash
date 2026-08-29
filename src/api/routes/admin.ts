@@ -20,6 +20,7 @@ import { getTenantManager } from '@/app/composition';
 import { paginationSchema } from '@/api/validators/common';
 import type { Tenant } from '@/platform/types';
 import { miniGameService } from '@/mini-app/game-service';
+import { getAdminReferralOverview } from '@/platform/referrals/referral-service';
 
 const configSchema = z.object({
   stakePerEntry: z.number().positive().optional(),
@@ -66,9 +67,24 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/admin/users
   fastify.get('/users', async (request, reply) => {
-    const query = paginationSchema.parse(request.query);
+    const query = paginationSchema.extend({
+      search: z.string().optional(),
+      status: z.string().optional(),
+    }).parse(request.query);
     const tenantManager = getTenantManager();
-    const users = await tenantManager.listUsers({ limit: query.limit });
+    let users = await tenantManager.listUsers({ limit: query.limit });
+    if (query.search) {
+      const s = query.search.toLowerCase();
+      users = users.filter(
+        (u) =>
+          (u.telegramUsername || '').toLowerCase().includes(s) ||
+          (u.firstName || '').toLowerCase().includes(s) ||
+          (u.lastName || '').toLowerCase().includes(s)
+      );
+    }
+    if (query.status && query.status !== 'all') {
+      users = users.filter((u) => u.status === query.status);
+    }
 
     reply.status(200).send({
       data: users.map(publicUser),
@@ -212,18 +228,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   fastify.get('/referrals/overview', async (_request, reply) => {
-    reply.send({
-      data: {
-        totalReferrals: 0,
-        qualifiedReferrals: 0,
-        pendingReferrals: 0,
-        conversionRate: 0,
-        rewardsIssued: 0,
-        rewardsPending: 0,
-        rewardsExpired: 0,
-        rewardsRevoked: 0,
-        topReferrers: [],
-      },
-    });
+    const data = await getAdminReferralOverview();
+    reply.send({ data });
   });
 }
