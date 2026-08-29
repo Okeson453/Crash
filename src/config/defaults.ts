@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     mode: 'dry-run',
     logLevel: 'info',
     serviceName: 'bc-game-crash-automation',
+    apiPort: 8081,
   },
   betting: {
     stakePerEntry: 700,

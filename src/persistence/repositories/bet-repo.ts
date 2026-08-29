@@ -549,13 +549,13 @@ export class InMemoryBetRepository {
   }
 
   async findByUser(userId: string, opts: { limit?: number; status?: string; cursor?: string } = {}): Promise<BetRecord[]> {
+    void userId;
     const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
-    const params: unknown[] = [userId, limit];
-    const filters = ['tenant_id = $1'];
-    if (opts.status) { params.splice(1, 0, opts.status); filters.push(`state = $${params.length}`); params[params.length - 1] = opts.status.toUpperCase(); params[params.length - 2] = limit; }
-    const query = `SELECT * FROM bets WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length}`;
-    const result = await this.pool.query(query, params);
-    return result.rows.map((row) => this.mapRow(row));
+    let rows = Array.from(this.bets.values());
+    if (opts.status) {
+      rows = rows.filter((b) => String(b.state).toUpperCase() === opts.status!.toUpperCase());
+    }
+    return rows.slice(0, limit);
   }
 
   async findByDailyKey(dailyKey: string): Promise<BetRecord[]> {

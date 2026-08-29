@@ -48,7 +48,14 @@ export type SystemEventType =
   | 'CriticalError'
   | 'OperatorCommandReceived'
   | 'PredictionStatePublished'
-  | 'ExecutionAuthorizationExpired';
+  | 'ExecutionAuthorizationExpired'
+  | 'round:start'
+  | 'tick'
+  | 'round:end'
+  | 'countdown'
+  | 'bet:placed'
+  | 'bet:cashed-out'
+  | 'balance:updated';
 
 export interface TypedEvent<T = unknown> extends BaseEvent {
   payload: T;

@@ -9,7 +9,6 @@ import { jwtVerify } from 'jose';
 import { getEventBusInstance } from '@/app/composition';
 import { miniGameService } from '@/mini-app/game-service';
 import { getLogger } from '@/observability/logger';
-import type { EventBus } from '@/core/event-bus/bus';
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'development-secret-change-in-production'
@@ -113,6 +112,7 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
 
   // Integrate the Mini App game service without coupling it to the legacy event bus.
   miniGameService.subscribe((name, payload) => {
+    if (!io) return;
     const message = { type: name, payload, timestamp: new Date().toISOString(), sequence: Date.now() };
     const tenantId = typeof payload.tenantId === 'string' ? payload.tenantId : undefined;
     const resolvedTenant = tenantId ?? (typeof payload.userId === 'string' ? payload.userId : undefined);
@@ -131,23 +131,28 @@ function integrateWithEventBus(io: SocketIOServer): void {
     const eventBus = getEventBusInstance();
 
     // Forward game events to WebSocket clients
-    eventBus.on('round:start', (payload: Record<string, unknown>) => {
+    eventBus.on('round:start', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       broadcast('game:round-start', payload);
     });
 
-    eventBus.on('tick', (payload: Record<string, unknown>) => {
+    eventBus.on('tick', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       broadcast('game:multiplier', payload);
     });
 
-    eventBus.on('round:end', (payload: Record<string, unknown>) => {
+    eventBus.on('round:end', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       broadcast('game:round-end', payload);
     });
 
-    eventBus.on('countdown', (payload: Record<string, unknown>) => {
+    eventBus.on('countdown', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       broadcast('game:countdown', payload);
     });
 
-    eventBus.on('bet:placed', (payload: Record<string, unknown>) => {
+    eventBus.on('bet:placed', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       const userId = payload.userId as string;
       if (userId) {
         io.to(`user:${userId}`).emit('event', {
@@ -158,7 +163,8 @@ function integrateWithEventBus(io: SocketIOServer): void {
       }
     });
 
-    eventBus.on('bet:cashed-out', (payload: Record<string, unknown>) => {
+    eventBus.on('bet:cashed-out', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       const userId = payload.userId as string;
       if (userId) {
         io.to(`user:${userId}`).emit('event', {
@@ -169,7 +175,8 @@ function integrateWithEventBus(io: SocketIOServer): void {
       }
     });
 
-    eventBus.on('balance:updated', (payload: Record<string, unknown>) => {
+    eventBus.on('balance:updated', (event) => {
+      const payload = event.payload as Record<string, unknown>;
       const userId = payload.userId as string;
       if (userId) {
         io.to(`user:${userId}`).emit('event', {

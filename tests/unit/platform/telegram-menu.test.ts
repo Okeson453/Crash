@@ -22,11 +22,16 @@ const tenant: Tenant = {
   id: 'abcdefghij',
   telegramId: 1n,
   telegramUsername: null,
+  firstName: 'Test',
+  lastName: null,
+  photoUrl: null,
   email: null,
   status: 'active',
+  role: 'player',
   planId: 'p1',
   timezone: 'UTC',
   createdAt: new Date(),
+  updatedAt: new Date(),
 };
 
 const plan: Plan = {

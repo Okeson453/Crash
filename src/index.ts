@@ -1,15 +1,25 @@
 import http from 'http';
 import { register } from 'prom-client';
-import { getConfig } from './config/schema.js';
+import { loadAndValidateConfig } from './config/loader.js';
 import { composeApplication, setGlobalComposition } from './app/composition.js';
 import { createApiServer } from './api/server.js';
 import { createWebSocketServer } from './api/websocket/server.js';
 import { getLogger } from './observability/logger.js';
+import { createPool } from './persistence/client.js';
+import { createRedisClient } from './persistence/redis-client.js';
 
-const config = getConfig();
+const config = loadAndValidateConfig();
+const databaseUrl = process.env.DATABASE_URL ?? process.env.APP_PERSISTENCE__CONNECTION_STRING;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required to start the control plane');
+}
+createPool({ connectionString: databaseUrl, poolSize: 10 });
+const redisUrl = process.env.REDIS_URL;
+if (redisUrl) {
+  createRedisClient({ url: redisUrl });
+}
+
 const { ctx, start, stop } = composeApplication(config);
-
-// Set global composition for API access
 setGlobalComposition({ ctx, start, stop });
 
 const metricsServer = http.createServer(async (req, res) => {
@@ -30,19 +40,17 @@ const metricsServer = http.createServer(async (req, res) => {
 async function main() {
   await start();
 
-  // Start metrics server
-  metricsServer.listen(config.httpPort, () => {
-    getLogger().info({ port: config.httpPort }, 'Metrics server listening');
+  const metricsPort = Number(process.env.METRICS_PORT ?? 9090);
+  metricsServer.listen(metricsPort, () => {
+    getLogger().info({ port: metricsPort }, 'Metrics server listening');
   });
 
-  // Start API server
   const apiServer = await createApiServer();
   const apiPort = config.system.apiPort;
 
   await apiServer.listen({ port: apiPort, host: '0.0.0.0' });
   getLogger().info({ port: apiPort }, 'API server listening');
 
-  // Start WebSocket server on same port as API
   createWebSocketServer(apiServer.server!);
   getLogger().info({}, 'WebSocket server started');
 

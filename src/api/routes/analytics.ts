@@ -36,7 +36,7 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/analytics/revenue
   fastify.get('/revenue', async (request, reply) => {
-    const query = periodQuerySchema.parse(request.query);
+    periodQuerySchema.parse(request.query);
 
     reply.status(200).send({
       data: {
@@ -50,7 +50,7 @@ export async function analyticsRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/analytics/players
   fastify.get('/players', async (request, reply) => {
-    const query = periodQuerySchema.parse(request.query);
+    periodQuerySchema.parse(request.query);
 
     reply.status(200).send({
       data: [],

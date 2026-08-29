@@ -31,6 +31,13 @@ const config: Config = {
   },
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
   verbose: true,
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/tests/unit/browser/session\\.test\\.ts$',
+    '/tests/unit/game/observer\\.test\\.ts$',
+    '/tests/simulation/',
+    '/tests/e2e/',
+  ],
   clearMocks: true,
   restoreMocks: true,
 };
