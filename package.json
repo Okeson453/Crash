@@ -1,7 +1,7 @@
 {
   "name": "bc-game-crash-automation",
   "version": "1.1.0",
-  "description": "CrashWave V1.1 — multi-worker adaptive crash automation platform",
+  "description": "CrashWave V1.1 \u2014 multi-worker adaptive crash automation platform",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -17,7 +17,7 @@
     "lint:fix": "eslint src tests scripts --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json",
     "db:migrate": "node scripts/run-migrations.mjs",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:backup": "bash scripts/backup-db.sh",
@@ -33,7 +33,8 @@
     "db:migrate:ts": "tsx scripts/db-migrate.ts",
     "test:load": "tsx scripts/load-test-500.ts",
     "test:load:burst": "tsx scripts/load-test-500.ts --burst",
-    "credentials:import": "tsx scripts/import-tenant-credentials.ts"
+    "credentials:import": "tsx scripts/import-tenant-credentials.ts",
+    "typecheck:all": "tsc --noEmit"
   },
   "keywords": [
     "automation",
