@@ -9,6 +9,7 @@ import {
   markNotificationRead,
   markAllNotificationsRead,
 } from '@/platform/notifications/user-notification-service';
+import { VirtualAccountService } from '@/platform/payments/virtual-account-service';
 import type { Tenant } from '@/platform/types';
 
 const updateProfileSchema = z.object({ email: z.string().email().optional(), timezone: z.string().min(1).max(64).optional() });
@@ -47,6 +48,78 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/me/notifications/read-all', { preHandler: authenticateRequest }, async (request, reply) => {
     const count = await markAllNotificationsRead(request.auth.userId);
     reply.send({ data: { count } });
+  });
+
+
+  fastify.get('/me/wallet/deposit-account', { preHandler: authenticateRequest }, async (request, reply) => {
+    try {
+      const svc = new VirtualAccountService();
+      const existing = await svc.getVirtualAccount(request.auth.userId);
+      if (existing) {
+        reply.send({
+          data: {
+            accountNumber: existing.accountNumber,
+            bankName: existing.bankName,
+            accountName: existing.accountName,
+            configured: true,
+          },
+        });
+        return;
+      }
+      if (!process.env.PAYSTACK_SECRET_KEY) {
+        reply.send({
+          data: {
+            accountNumber: null,
+            bankName: null,
+            accountName: null,
+            configured: false,
+            message: 'PAYSTACK_SECRET_KEY is not configured. Set it to enable bank-transfer deposits.',
+          },
+        });
+        return;
+      }
+      const va = await svc.createVirtualAccountForUser(request.auth.userId);
+      reply.send({
+        data: {
+          accountNumber: va.accountNumber,
+          bankName: va.bankName,
+          accountName: va.accountName,
+          configured: true,
+        },
+      });
+    } catch (err) {
+      reply.status(503).send({
+        error: {
+          code: 'DEPOSIT_UNAVAILABLE',
+          message: err instanceof Error ? err.message : 'Deposit account unavailable',
+        },
+      });
+    }
+  });
+
+  fastify.get('/me/wallet/transactions', { preHandler: authenticateRequest }, async (request, reply) => {
+    try {
+      const result = await getPool().query(
+        `SELECT id, amount, amount_minor, currency, status, paystack_reference, created_at
+         FROM payment_transactions
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [request.auth.userId]
+      );
+      reply.send({
+        data: result.rows.map((row) => ({
+          id: String(row.id),
+          amount: Number(row.amount ?? 0),
+          currency: String(row.currency ?? 'NGN'),
+          status: String(row.status),
+          reference: row.paystack_reference ? String(row.paystack_reference) : null,
+          createdAt: new Date(row.created_at as string | Date).toISOString(),
+        })),
+      });
+    } catch {
+      reply.send({ data: [] });
+    }
   });
 
 }

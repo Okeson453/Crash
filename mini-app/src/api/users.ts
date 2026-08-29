@@ -66,3 +66,28 @@ export async function markNotificationRead(id: string): Promise<{ ok: boolean }>
 export async function markAllNotificationsRead(): Promise<{ count: number }> {
   return api.post<{ count: number }>('/api/v1/users/me/notifications/read-all');
 }
+
+export interface DepositAccount {
+  accountNumber: string | null;
+  bankName: string | null;
+  accountName: string | null;
+  configured: boolean;
+  message?: string;
+}
+
+export interface WalletTransaction {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  reference: string | null;
+  createdAt: string;
+}
+
+export async function getDepositAccount(): Promise<DepositAccount> {
+  return api.get<DepositAccount>('/api/v1/users/me/wallet/deposit-account');
+}
+
+export async function getWalletTransactions(): Promise<WalletTransaction[]> {
+  return api.get<WalletTransaction[]>('/api/v1/users/me/wallet/transactions');
+}

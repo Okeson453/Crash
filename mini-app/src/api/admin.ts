@@ -199,3 +199,67 @@ export async function getAdminConfigHistory(): Promise<ConfigHistoryEntry[]> {
     return [];
   }
 }
+
+
+export interface ReferralCampaign {
+  id: string;
+  name: string;
+  qualificationWindowDays: number;
+  maxMilestone: number;
+  milestones: number[];
+  isActive: boolean;
+  startsAt: string;
+  endsAt: string | null;
+  minPlan: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface FraudSignal {
+  id: string;
+  type: string;
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  referrerId?: string;
+  referredId?: string;
+  count?: number;
+  createdAt: string;
+}
+
+export async function getReferralCampaigns(): Promise<ReferralCampaign[]> {
+  return api.get<ReferralCampaign[]>('/api/v1/admin/referrals/campaigns');
+}
+
+export async function createReferralCampaign(body: {
+  name: string;
+  qualificationWindowDays?: number;
+  maxMilestone?: number;
+  minPlan?: string;
+  notes?: string;
+}): Promise<ReferralCampaign> {
+  return api.post<ReferralCampaign>('/api/v1/admin/referrals/campaigns', body);
+}
+
+export async function setReferralCampaignActive(
+  id: string,
+  isActive: boolean
+): Promise<ReferralCampaign> {
+  return api.put<ReferralCampaign>(`/api/v1/admin/referrals/campaigns/${id}/active`, { isActive });
+}
+
+export async function updateReferralCampaignRules(
+  id: string,
+  rules: {
+    qualificationWindowDays?: number;
+    maxMilestone?: number;
+    milestones?: number[];
+    minPlan?: string;
+    notes?: string;
+  }
+): Promise<ReferralCampaign> {
+  return api.put<ReferralCampaign>(`/api/v1/admin/referrals/campaigns/${id}/rules`, rules);
+}
+
+export async function getReferralFraudSignals(): Promise<FraudSignal[]> {
+  return api.get<FraudSignal[]>('/api/v1/admin/referrals/fraud');
+}

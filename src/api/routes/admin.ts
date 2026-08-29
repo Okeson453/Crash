@@ -22,6 +22,14 @@ import { paginationSchema } from '@/api/validators/common';
 import type { Tenant } from '@/platform/types';
 import { miniGameService } from '@/mini-app/game-service';
 import { getAdminReferralOverview } from '@/platform/referrals/referral-service';
+import {
+  listCampaigns,
+  createCampaign,
+  setCampaignActive,
+  updateCampaignRules,
+  getFraudSignals,
+} from '@/platform/referrals/admin-referral-service';
+import { loadAdminSetting, saveAdminSetting } from '@/platform/admin-settings-store';
 import { revokeReward } from '@/platform/referrals/reward-service';
 
 const configSchema = z.object({
@@ -243,6 +251,63 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data });
   });
 
+  
+  fastify.get('/referrals/campaigns', async (_request, reply) => {
+    const data = await listCampaigns();
+    reply.send({ data });
+  });
+
+  fastify.post('/referrals/campaigns', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      name: z.string().min(1).max(120),
+      qualificationWindowDays: z.number().int().min(1).max(90).optional(),
+      maxMilestone: z.number().int().min(1).max(100).optional(),
+      milestones: z.array(z.number().int()).optional(),
+      minPlan: z.string().max(32).optional(),
+      notes: z.string().max(500).optional(),
+      endsAt: z.string().datetime().nullable().optional(),
+    }).parse(request.body);
+    const data = await createCampaign(body);
+    if (!data) {
+      reply.status(500).send({ error: { code: 'CREATE_FAILED', message: 'Could not create campaign' } });
+      return;
+    }
+    reply.send({ data });
+  });
+
+  fastify.put('/referrals/campaigns/:id/active', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({ isActive: z.boolean() }).parse(request.body);
+    const data = await setCampaignActive(id, body.isActive);
+    if (!data) {
+      reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Campaign not found' } });
+      return;
+    }
+    reply.send({ data });
+  });
+
+  fastify.put('/referrals/campaigns/:id/rules', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({
+      qualificationWindowDays: z.number().int().min(1).max(90).optional(),
+      maxMilestone: z.number().int().min(1).max(100).optional(),
+      milestones: z.array(z.number().int()).optional(),
+      minPlan: z.string().max(32).optional(),
+      notes: z.string().max(500).optional(),
+    }).parse(request.body);
+    const data = await updateCampaignRules(id, body);
+    if (!data) {
+      reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Campaign not found' } });
+      return;
+    }
+    reply.send({ data });
+  });
+
+  fastify.get('/referrals/fraud', async (_request, reply) => {
+    const data = await getFraudSignals(50);
+    reply.send({ data });
+  });
+
   fastify.post('/referrals/rewards/:id/revoke', { preHandler: requireRole('admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = z.object({ reason: z.string().min(1).max(500) }).parse(request.body ?? { reason: 'admin_revoke' });
@@ -259,6 +324,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   fastify.get('/tenant', async (_request, reply) => {
+    runtimeAdminSettings.tenant = await loadAdminSetting('tenant', runtimeAdminSettings.tenant);
     reply.send({ data: runtimeAdminSettings.tenant });
   });
 
@@ -273,6 +339,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       slug: body.slug,
       description: body.description ?? '',
     };
+    await saveAdminSetting('tenant', runtimeAdminSettings.tenant, request.auth.userId);
     reply.send({ data: runtimeAdminSettings.tenant.identity });
   });
 
@@ -283,6 +350,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
     }).parse(request.body);
     runtimeAdminSettings.tenant.branding = body;
+    await saveAdminSetting('tenant', runtimeAdminSettings.tenant, request.auth.userId);
     reply.send({ data: runtimeAdminSettings.tenant.branding });
   });
 
@@ -294,6 +362,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       maxDailyWager: z.number().min(0),
     }).parse(request.body);
     runtimeAdminSettings.tenant.limits = body;
+    await saveAdminSetting('tenant', runtimeAdminSettings.tenant, request.auth.userId);
     reply.send({ data: runtimeAdminSettings.tenant.limits });
   });
 
@@ -314,10 +383,12 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       maxSessionHours: z.number().min(0).max(24),
     }).parse(request.body);
     runtimeAdminSettings.rg = body;
+    await saveAdminSetting('rg', runtimeAdminSettings.rg, request.auth.userId);
     reply.send({ data: runtimeAdminSettings.rg });
   });
 
   fastify.get('/integrations/webhooks', async (_request, reply) => {
+    runtimeAdminSettings.webhooks = await loadAdminSetting('webhooks', runtimeAdminSettings.webhooks);
     reply.send({ data: runtimeAdminSettings.webhooks });
   });
 
@@ -328,6 +399,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       userEvents: z.string().max(500),
     }).parse(request.body);
     runtimeAdminSettings.webhooks = body;
+    await saveAdminSetting('webhooks', runtimeAdminSettings.webhooks, request.auth.userId);
     reply.send({ data: runtimeAdminSettings.webhooks });
   });
 
