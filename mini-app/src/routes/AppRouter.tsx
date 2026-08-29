@@ -22,6 +22,7 @@ import { SettingsSectionScreen } from '@/screens/settings/SettingsSectionScreen'
 import { ReferralsScreen } from '@/screens/ReferralsScreen';
 import { WalletScreen } from '@/screens/WalletScreen';
 import { NotificationsScreen } from '@/screens/NotificationsScreen';
+import { ProfileScreen } from '@/screens/ProfileScreen';
 
 export function AppRouter() {
   return (
@@ -42,6 +43,7 @@ export function AppRouter() {
         <Route path="/referrals" element={<ErrorBoundary><ReferralsScreen /></ErrorBoundary>} />
         <Route path="/wallet" element={<ErrorBoundary><WalletScreen /></ErrorBoundary>} />
         <Route path="/notifications" element={<ErrorBoundary><NotificationsScreen /></ErrorBoundary>} />
+        <Route path="/profile" element={<ErrorBoundary><ProfileScreen /></ErrorBoundary>} />
         <Route path="/verify/:roundId" element={<ErrorBoundary><VerifyScreen /></ErrorBoundary>} />
       </Route>
 

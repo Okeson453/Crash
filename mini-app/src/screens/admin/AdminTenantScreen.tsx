@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getTenantSettings } from '@/api/admin';
+import { TenantIdentityForm } from '@/components/admin/TenantIdentityForm';
 import { LoadingSpinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Card } from '@/components/ui/Card';
@@ -26,18 +27,12 @@ export function AdminTenantScreen() {
 
   return (
     <div className="space-y-4">
-      <Card className="space-y-2">
-        <p className="text-sm font-semibold text-tg-text">Identity</p>
-        <p className="text-sm text-tg-text">{identity.displayName}</p>
-        <p className="text-xs text-tg-hint">Slug: {identity.slug}</p>
-        {identity.description && (
-          <p className="text-xs text-tg-hint">{identity.description}</p>
-        )}
-      </Card>
+      <TenantIdentityForm identity={identity} />
       <Card className="space-y-2">
         <p className="text-sm font-semibold text-tg-text">Branding</p>
         <p className="text-xs text-tg-hint">Primary: {branding.primaryColor}</p>
         <p className="text-xs text-tg-hint">Accent: {branding.accentColor}</p>
+        <p className="text-xs text-tg-hint truncate">Logo: {branding.logoUrl || '—'}</p>
       </Card>
       <Card className="space-y-2">
         <p className="text-sm font-semibold text-tg-text">Limits</p>

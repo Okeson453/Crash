@@ -40,6 +40,21 @@ async function getMyReferralActivity(): Promise<ReferralActivityItem[]> {
   return api.get<ReferralActivityItem[]>('/api/v1/referrals/me/activity');
 }
 
+interface ReferralRewardItem {
+  id: string;
+  milestone: number;
+  rewardType: string;
+  entriesQuantity: number;
+  hoursQuantity: number;
+  status: string;
+  issuedAt: string;
+  expiresAt: string | null;
+}
+
+async function getMyReferralRewards(): Promise<ReferralRewardItem[]> {
+  return api.get<ReferralRewardItem[]>('/api/v1/referrals/me/rewards');
+}
+
 const STATUS_LABEL: Record<string, string> = {
   PENDING: 'Pending',
   SUBSCRIPTION_REQUIRED: 'Subscription required',
@@ -60,6 +75,10 @@ export function ReferralsScreen() {
   const activity = useQuery({
     queryKey: ['referrals-activity'],
     queryFn: getMyReferralActivity,
+  });
+  const rewards = useQuery({
+    queryKey: ['referrals-rewards'],
+    queryFn: getMyReferralRewards,
   });
 
   if (progress.isLoading) return <LoadingSpinner size="lg" />;
@@ -152,6 +171,40 @@ export function ReferralsScreen() {
           <li>Rewards are bonus entries / betting time — not withdrawable cash</li>
         </ul>
       </Card>
+
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-tg-text">Reward history</p>
+        {rewards.isLoading && <LoadingSpinner size="sm" />}
+        {!rewards.isLoading && !(rewards.data?.length) && (
+          <Card>
+            <p className="text-sm text-tg-hint">No rewards issued yet. Reach milestone 5 to unlock.</p>
+          </Card>
+        )}
+        {(rewards.data ?? []).map((r) => (
+          <Card key={r.id} className="flex items-center justify-between py-3">
+            <div>
+              <p className="text-sm text-tg-text">Milestone {r.milestone}</p>
+              <p className="text-xs text-tg-hint">
+                {r.entriesQuantity > 0 ? `${r.entriesQuantity} entries` : ''}
+                {r.entriesQuantity > 0 && r.hoursQuantity > 0 ? ' · ' : ''}
+                {r.hoursQuantity > 0 ? `${r.hoursQuantity}h` : ''}
+                {r.expiresAt ? ` · expires ${new Date(r.expiresAt).toLocaleDateString()}` : ''}
+              </p>
+            </div>
+            <Badge
+              variant={
+                r.status === 'activated' || r.status === 'issued'
+                  ? 'success'
+                  : r.status === 'expired' || r.status === 'revoked'
+                    ? 'danger'
+                    : 'neutral'
+              }
+            >
+              {r.status}
+            </Badge>
+          </Card>
+        ))}
+      </div>
 
       <div className="space-y-2">
         <p className="text-sm font-semibold text-tg-text">Referral activity</p>

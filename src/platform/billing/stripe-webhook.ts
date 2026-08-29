@@ -42,6 +42,27 @@ export function verifyStripeSignature(
   }
 }
 
+
+async function resolveUserIdFromStripeObject(obj: Record<string, unknown>): Promise<string | null> {
+  const meta = (obj.metadata ?? {}) as Record<string, string>;
+  if (meta.user_id) return String(meta.user_id);
+  if (meta.userId) return String(meta.userId);
+  const customerId = typeof obj.customer === 'string' ? obj.customer : null;
+  if (customerId) {
+    const r = await getPool().query(
+      `SELECT user_id FROM subscriptions
+       WHERE payment_provider_subscription_id = $1
+       LIMIT 1`,
+      [customerId]
+    );
+    if (r.rows[0]?.user_id) return String(r.rows[0].user_id);
+  }
+  // charge may reference payment_intent / invoice — try client_reference style metadata on parent
+  const ref = obj.client_reference_id ?? meta.client_reference_id;
+  if (ref) return String(ref);
+  return null;
+}
+
 export async function handleStripeEvent(event: {
   id?: string;
   type: string;
@@ -122,6 +143,27 @@ export async function handleStripeEvent(event: {
         );
       }
       return { ok: true };
+    }
+
+    case 'charge.refunded': {
+      const obj = event.data.object;
+      const userId = await resolveUserIdFromStripeObject(obj);
+      if (userId) {
+        await subs.handlePaymentRefund(userId);
+        logger.info({ component: 'StripeWebhook', userId }, 'Referral invalidated on refund');
+      }
+      return { ok: true, message: userId ? 'refund_handled' : 'refund_no_user' };
+    }
+
+    case 'charge.dispute.created':
+    case 'charge.dispute.funds_withdrawn': {
+      const obj = event.data.object;
+      const userId = await resolveUserIdFromStripeObject(obj);
+      if (userId) {
+        await subs.handleChargeback(userId);
+        logger.info({ component: 'StripeWebhook', userId, type: event.type }, 'Referral invalidated on dispute');
+      }
+      return { ok: true, message: userId ? 'dispute_handled' : 'dispute_no_user' };
     }
 
     default:

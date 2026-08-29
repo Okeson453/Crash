@@ -17,6 +17,9 @@ import type {
   WebhookEndpoints,
   ConnectedService,
   ReferralAdminOverview,
+  TenantLimits,
+  TenantBranding,
+  TenantIdentity,
   AdminActivity,
 } from '@/types/api';
 
@@ -154,4 +157,35 @@ export async function getAdminRounds(
 ): Promise<PaginatedResponse<{ id: string; crashPoint?: number; betCount?: number; createdAt?: string }>> {
   const params = cursor ? `?cursor=${cursor}` : '';
   return api.get(`/api/v1/admin/rounds${params}`);
+}
+
+export async function updateTenantIdentity(data: TenantIdentity): Promise<TenantIdentity> {
+  return api.put<TenantIdentity>('/api/v1/admin/tenant/identity', data);
+}
+
+export async function updateTenantBranding(data: TenantBranding): Promise<TenantBranding> {
+  return api.put<TenantBranding>('/api/v1/admin/tenant/branding', data);
+}
+
+export async function updateTenantLimits(data: TenantLimits): Promise<TenantLimits> {
+  return api.put<TenantLimits>('/api/v1/admin/tenant/limits', data);
+}
+
+export async function updateComplianceSettings(data: RgSettings): Promise<RgSettings> {
+  return api.put<RgSettings>('/api/v1/admin/compliance/rg', data);
+}
+
+export async function updateWebhookEndpoints(data: WebhookEndpoints): Promise<WebhookEndpoints> {
+  return api.put<WebhookEndpoints>('/api/v1/admin/integrations/webhooks', data);
+}
+
+export async function updateBotWebhook(url: string): Promise<void> {
+  return api.put<void>('/api/v1/admin/integrations/telegram/webhook', { url });
+}
+
+export async function testWebhook(url: string): Promise<{ ok: boolean; message?: string }> {
+  return api.post<{ ok: boolean; message?: string }>(
+    '/api/v1/admin/integrations/telegram/webhook/test',
+    { url }
+  );
 }

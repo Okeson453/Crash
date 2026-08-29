@@ -191,3 +191,40 @@ export async function revokeReward(params: {
     return false;
   }
 }
+
+export interface UserRewardView {
+  id: string;
+  milestone: number;
+  rewardType: string;
+  entriesQuantity: number;
+  hoursQuantity: number;
+  status: string;
+  issuedAt: string;
+  expiresAt: string | null;
+}
+
+export async function listUserRewards(userId: string): Promise<UserRewardView[]> {
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT id, milestone, reward_type, entries_quantity, hours_quantity, status, issued_at, expires_at
+       FROM referral_reward_ledger
+       WHERE user_id = $1
+       ORDER BY issued_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+    return result.rows.map((row) => ({
+      id: String(row.id),
+      milestone: Number(row.milestone),
+      rewardType: String(row.reward_type),
+      entriesQuantity: Number(row.entries_quantity ?? 0),
+      hoursQuantity: Number(row.hours_quantity ?? 0),
+      status: String(row.status),
+      issuedAt: new Date(row.issued_at as string | Date).toISOString(),
+      expiresAt: row.expires_at ? new Date(row.expires_at as string | Date).toISOString() : null,
+    }));
+  } catch {
+    return [];
+  }
+}

@@ -54,6 +54,7 @@ export function DashboardScreen() {
           <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/wallet')}>Wallet</button>
           <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/referrals')}>Referrals</button>
           <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/notifications')}>Notifications</button>
+          <button type="button" className="text-xs font-medium text-tg-link" onClick={() => navigate('/profile')}>Profile</button>
         </div>
       </div>
 

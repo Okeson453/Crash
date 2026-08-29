@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { authenticateRequest } from '@/api/middleware/auth';
 import { requireRole } from '@/api/middleware/role-guard';
 import { getTenantManager } from '@/app/composition';
+import { getPool } from '@/persistence/client';
 import { paginationSchema } from '@/api/validators/common';
 import type { Tenant } from '@/platform/types';
 import { miniGameService } from '@/mini-app/game-service';
@@ -35,6 +36,28 @@ function publicUser(user: Tenant) { return { id: user.id, telegramId: user.teleg
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.addHook('preHandler', authenticateRequest);
   fastify.addHook('preHandler', requireRole('operator', 'admin'));
+
+  // In-memory tenant/compliance/integration settings (per-process; replace with DB later)
+  const runtimeAdminSettings: {
+    tenant: {
+      identity: { displayName: string; slug: string; description: string };
+      branding: { logoUrl: string; primaryColor: string; accentColor: string };
+      limits: { currency: string; minBet: number; maxBet: number; maxDailyWager: number };
+    };
+    rg: { betCooldownMinutes: number; maxLossPerDay: number; maxSessionHours: number };
+    webhooks: { betEvents: string; roundEvents: string; userEvents: string };
+    telegramWebhook: string | null;
+  } = {
+    tenant: {
+      identity: { displayName: 'CrashWave', slug: 'crashwave', description: '' },
+      branding: { logoUrl: '', primaryColor: '#2481cc', accentColor: '#22c55e' },
+      limits: { currency: 'USD', minBet: 1, maxBet: 10000, maxDailyWager: 100000 },
+    },
+    rg: { betCooldownMinutes: 0, maxLossPerDay: 0, maxSessionHours: 24 },
+    webhooks: { betEvents: '', roundEvents: '', userEvents: '' },
+    telegramWebhook: null,
+  };
+
 
   // GET /api/v1/admin/session
   fastify.get('/session', async (_request, reply) => {
@@ -114,33 +137,42 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // === Design-concept admin extensions (stubs with safe defaults) ===
 
   fastify.get('/overview', async (_request, reply) => {
+    const state = miniGameService.getState();
+    const isRunning = state.phase === 'running' || state.phase === 'countdown';
     reply.send({
       data: {
-        totalRounds: 0,
-        activePlayers: 0,
+        totalRounds: Number((state as { totalRounds?: number }).totalRounds ?? 0),
+        activePlayers: Number((state as { activePlayers?: number }).activePlayers ?? 0),
         revenue24h: 0,
-        profit24h: 0,
-        totalBets: 0,
-        totalPnl: 0,
+        profit24h: Number((state as { totalPnl?: number }).totalPnl ?? 0),
+        totalBets: Number((state as { totalBets?: number }).totalBets ?? 0),
+        totalPnl: Number((state as { totalPnl?: number }).totalPnl ?? 0),
         revenueChart: [],
-        latestAlerts: [],
+        latestAlerts: isRunning
+          ? []
+          : [{ name: 'Engine', status: 'degraded' as const, message: `Phase: ${state.phase}` }],
       },
     });
   });
 
   fastify.post('/users/:id/suspend', { preHandler: requireRole('admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const tenantManager = getTenantManager();
+    await tenantManager.updateUserStatus(id, 'suspended');
     reply.send({ data: { id, status: 'suspended' } });
   });
 
   fastify.post('/users/:id/unsuspend', { preHandler: requireRole('admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const tenantManager = getTenantManager();
+    await tenantManager.updateUserStatus(id, 'active');
     reply.send({ data: { id, status: 'active' } });
   });
 
   fastify.put('/users/:id/role', { preHandler: requireRole('admin') }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = z.object({ role: z.enum(['player', 'operator', 'admin']) }).parse(request.body);
+    await getPool().query(`UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2`, [body.role, id]);
     reply.send({ data: { id, role: body.role } });
   });
 
@@ -153,16 +185,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({
       data: [],
       pagination: { cursor: null, hasMore: false, limit: query.limit },
-    });
-  });
-
-  fastify.get('/tenant', async (_request, reply) => {
-    reply.send({
-      data: {
-        identity: { displayName: 'CrashWave', slug: 'crashwave', description: '' },
-        branding: { logoUrl: '', primaryColor: '#2481cc', accentColor: '#22c55e' },
-        limits: { currency: 'USD', minBet: 1, maxBet: 10000, maxDailyWager: 100000 },
-      },
     });
   });
 
@@ -187,12 +209,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data: [] });
   });
 
-  fastify.get('/compliance/rg', async (_request, reply) => {
-    reply.send({
-      data: { betCooldownMinutes: 0, maxLossPerDay: 0, maxSessionHours: 24 },
-    });
-  });
-
   fastify.get('/compliance/self-exclusion', async (_request, reply) => {
     reply.send({ data: [] });
   });
@@ -204,17 +220,11 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/integrations/telegram', async (_request, reply) => {
     reply.send({
       data: {
-        botName: 'crashwave_bot',
-        isConnected: false,
-        webhookUrl: null,
+        botName: process.env.TELEGRAM_BOT_USERNAME ?? 'crashwave_bot',
+        isConnected: Boolean(process.env.TELEGRAM_BOT_TOKEN),
+        webhookUrl: runtimeAdminSettings?.telegramWebhook ?? null,
         lastPingAt: null,
       },
-    });
-  });
-
-  fastify.get('/integrations/webhooks', async (_request, reply) => {
-    reply.send({
-      data: { betEvents: '', roundEvents: '', userEvents: '' },
     });
   });
 
@@ -246,5 +256,84 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
     reply.send({ data: { revoked: true } });
+  });
+
+  fastify.get('/tenant', async (_request, reply) => {
+    reply.send({ data: runtimeAdminSettings.tenant });
+  });
+
+  fastify.put('/tenant/identity', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      displayName: z.string().min(1).max(100),
+      slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
+      description: z.string().max(500).optional(),
+    }).parse(request.body);
+    runtimeAdminSettings.tenant.identity = {
+      displayName: body.displayName,
+      slug: body.slug,
+      description: body.description ?? '',
+    };
+    reply.send({ data: runtimeAdminSettings.tenant.identity });
+  });
+
+  fastify.put('/tenant/branding', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      logoUrl: z.string().max(500),
+      primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+      accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+    }).parse(request.body);
+    runtimeAdminSettings.tenant.branding = body;
+    reply.send({ data: runtimeAdminSettings.tenant.branding });
+  });
+
+  fastify.put('/tenant/limits', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      currency: z.string().min(3).max(3),
+      minBet: z.number().min(0),
+      maxBet: z.number().min(0),
+      maxDailyWager: z.number().min(0),
+    }).parse(request.body);
+    runtimeAdminSettings.tenant.limits = body;
+    reply.send({ data: runtimeAdminSettings.tenant.limits });
+  });
+
+  fastify.get('/compliance/rg', async (_request, reply) => {
+    reply.send({ data: runtimeAdminSettings.rg });
+  });
+
+  fastify.put('/compliance/rg', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      betCooldownMinutes: z.number().min(0).max(1440),
+      maxLossPerDay: z.number().min(0),
+      maxSessionHours: z.number().min(0).max(24),
+    }).parse(request.body);
+    runtimeAdminSettings.rg = body;
+    reply.send({ data: runtimeAdminSettings.rg });
+  });
+
+  fastify.get('/integrations/webhooks', async (_request, reply) => {
+    reply.send({ data: runtimeAdminSettings.webhooks });
+  });
+
+  fastify.put('/integrations/webhooks', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({
+      betEvents: z.string().max(500),
+      roundEvents: z.string().max(500),
+      userEvents: z.string().max(500),
+    }).parse(request.body);
+    runtimeAdminSettings.webhooks = body;
+    reply.send({ data: runtimeAdminSettings.webhooks });
+  });
+
+  fastify.put('/integrations/telegram/webhook', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({ url: z.string().max(500) }).parse(request.body);
+    runtimeAdminSettings.telegramWebhook = body.url || null;
+    reply.send({ data: { webhookUrl: runtimeAdminSettings.telegramWebhook } });
+  });
+
+  fastify.post('/integrations/telegram/webhook/test', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const body = z.object({ url: z.string().max(500).optional() }).parse(request.body ?? {});
+    const url = body.url || runtimeAdminSettings.telegramWebhook;
+    reply.send({ data: { ok: Boolean(url), url: url ?? null, message: url ? 'Webhook URL recorded' : 'No webhook URL' } });
   });
 }

@@ -12,6 +12,7 @@ import {
   getReferralActivity,
   getReferralProgress,
 } from '@/platform/referrals/referral-service';
+import { listUserRewards } from '@/platform/referrals/reward-service';
 import { getTenantManager } from '@/app/composition';
 
 export async function referralsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -31,6 +32,11 @@ export async function referralsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get('/me/activity', async (request, reply) => {
     const data = await getReferralActivity(request.auth.userId);
+    reply.send({ data });
+  });
+
+  fastify.get('/me/rewards', async (request, reply) => {
+    const data = await listUserRewards(request.auth.userId);
     reply.send({ data });
   });
 
