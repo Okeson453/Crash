@@ -28,6 +28,8 @@ import {
   setCampaignActive,
   updateCampaignRules,
   getFraudSignals,
+  listReferralsByStatus,
+  listRewardLedger,
 } from '@/platform/referrals/admin-referral-service';
 import { loadAdminSetting, saveAdminSetting } from '@/platform/admin-settings-store';
 import { revokeReward } from '@/platform/referrals/reward-service';
@@ -266,6 +268,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       minPlan: z.string().max(32).optional(),
       notes: z.string().max(500).optional(),
       endsAt: z.string().datetime().nullable().optional(),
+      startsAt: z.string().datetime().nullable().optional(),
+      rewardExpiryDays: z.number().int().min(1).max(365).optional(),
     }).parse(request.body);
     const data = await createCampaign(body);
     if (!data) {
@@ -294,12 +298,30 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       milestones: z.array(z.number().int()).optional(),
       minPlan: z.string().max(32).optional(),
       notes: z.string().max(500).optional(),
+      rewardExpiryDays: z.number().int().min(1).max(365).optional(),
+      startsAt: z.string().datetime().nullable().optional(),
+      endsAt: z.string().datetime().nullable().optional(),
     }).parse(request.body);
     const data = await updateCampaignRules(id, body);
     if (!data) {
       reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Campaign not found' } });
       return;
     }
+    reply.send({ data });
+  });
+
+  fastify.get('/referrals/qualified', async (_request, reply) => {
+    const data = await listReferralsByStatus('QUALIFIED', 100);
+    reply.send({ data });
+  });
+
+  fastify.get('/referrals/pending', async (_request, reply) => {
+    const data = await listReferralsByStatus('ALL_PENDING', 100);
+    reply.send({ data });
+  });
+
+  fastify.get('/referrals/rewards', async (_request, reply) => {
+    const data = await listRewardLedger(100);
     reply.send({ data });
   });
 

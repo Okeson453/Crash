@@ -7,7 +7,13 @@ import {
   setReferralCampaignActive,
   updateReferralCampaignRules,
   getReferralFraudSignals,
+  getAdminQualifiedReferrals,
+  getAdminPendingReferrals,
+  getAdminReferralRewards,
+  revokeReferralReward,
   type ReferralCampaign,
+  type AdminReferralRow,
+  type AdminRewardRow,
 } from '@/api/admin';
 import { LoadingSpinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -19,12 +25,22 @@ import { Badge } from '@/components/ui/Badge';
 import { Users, Gift, AlertTriangle, Flag, Settings2 } from 'lucide-react';
 import { useUIStore } from '@/stores/uiStore';
 
-type SubTab = 'overview' | 'campaigns' | 'rules' | 'fraud';
+type SubTab =
+  | 'overview'
+  | 'qualified'
+  | 'pending'
+  | 'rewards'
+  | 'campaigns'
+  | 'rules'
+  | 'fraud';
 
 export function AdminReferralsScreen() {
   const [tab, setTab] = useState<SubTab>('overview');
   const tabs: { id: SubTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'qualified', label: 'Qualified' },
+    { id: 'pending', label: 'Pending' },
+    { id: 'rewards', label: 'Rewards' },
     { id: 'campaigns', label: 'Campaigns' },
     { id: 'rules', label: 'Rules' },
     { id: 'fraud', label: 'Fraud' },
@@ -47,6 +63,9 @@ export function AdminReferralsScreen() {
         ))}
       </div>
       {tab === 'overview' && <OverviewPanel />}
+      {tab === 'qualified' && <QualifiedPanel />}
+      {tab === 'pending' && <PendingPanel />}
+      {tab === 'rewards' && <RewardsPanel />}
       {tab === 'campaigns' && <CampaignsPanel />}
       {tab === 'rules' && <RulesPanel />}
       {tab === 'fraud' && <FraudPanel />}
@@ -227,6 +246,7 @@ function RulesPanel() {
   const [windowDays, setWindowDays] = useState<number | ''>('');
   const [maxMilestone, setMaxMilestone] = useState<number | ''>('');
   const [minPlan, setMinPlan] = useState('');
+  const [rewardExpiryDays, setRewardExpiryDays] = useState<number | ''>('');
 
   const save = useMutation({
     mutationFn: () => {
@@ -235,6 +255,7 @@ function RulesPanel() {
         qualificationWindowDays: windowDays === '' ? undefined : Number(windowDays),
         maxMilestone: maxMilestone === '' ? undefined : Number(maxMilestone),
         minPlan: minPlan || undefined,
+        rewardExpiryDays: rewardExpiryDays === '' ? undefined : Number(rewardExpiryDays),
       });
     },
     onSuccess: () => {
@@ -290,6 +311,18 @@ function RulesPanel() {
           onChange={(e) => setMinPlan(e.target.value)}
         />
       </div>
+      <div>
+        <Label htmlFor="rule-expiry">Reward expiry (days)</Label>
+        <Input
+          id="rule-expiry"
+          type="number"
+          placeholder={String(active.rewardExpiryDays ?? 30)}
+          value={rewardExpiryDays}
+          onChange={(e) =>
+            setRewardExpiryDays(e.target.value === '' ? '' : Number(e.target.value))
+          }
+        />
+      </div>
       <Button className="w-full" loading={save.isPending} disabled={save.isPending} onClick={() => save.mutate()}>
         Save rules
       </Button>
@@ -328,6 +361,113 @@ function FraudPanel() {
           </div>
           <p className="text-xs text-tg-hint">{s.type}</p>
           <p className="text-[10px] text-tg-hint">{new Date(s.createdAt).toLocaleString()}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function QualifiedPanel() {
+  const query = useQuery({
+    queryKey: ['admin-referrals-qualified'],
+    queryFn: getAdminQualifiedReferrals,
+  });
+  if (query.isLoading) return <LoadingSpinner size="lg" />;
+  const rows = query.data ?? [];
+  if (!rows.length) {
+    return <EmptyState icon={Users} title="No qualified referrals" description="Qualified referrals will appear here." />;
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((r: AdminReferralRow) => (
+        <Card key={r.id} className="space-y-1">
+          <div className="flex justify-between gap-2">
+            <p className="text-sm font-medium text-tg-text truncate">
+              @{r.referrerUsername || r.referrerId.slice(0, 8)} → @{r.referredUsername || r.referredId.slice(0, 8)}
+            </p>
+            <Badge variant="success">{r.status}</Badge>
+          </div>
+          <p className="text-xs text-tg-hint">
+            Qualified {r.qualifiedAt ? new Date(r.qualifiedAt).toLocaleString() : '—'}
+          </p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function PendingPanel() {
+  const query = useQuery({
+    queryKey: ['admin-referrals-pending'],
+    queryFn: getAdminPendingReferrals,
+  });
+  if (query.isLoading) return <LoadingSpinner size="lg" />;
+  const rows = query.data ?? [];
+  if (!rows.length) {
+    return <EmptyState icon={Users} title="No pending referrals" description="Pending attributions will appear here." />;
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((r: AdminReferralRow) => (
+        <Card key={r.id} className="space-y-1">
+          <div className="flex justify-between gap-2">
+            <p className="text-sm font-medium text-tg-text truncate">
+              @{r.referrerUsername || r.referrerId.slice(0, 8)} → @{r.referredUsername || r.referredId.slice(0, 8)}
+            </p>
+            <Badge variant="warning">{r.status}</Badge>
+          </div>
+          <p className="text-xs text-tg-hint">Created {new Date(r.createdAt).toLocaleString()}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function RewardsPanel() {
+  const qc = useQueryClient();
+  const addToast = useUIStore((s) => s.addToast);
+  const query = useQuery({
+    queryKey: ['admin-referrals-rewards'],
+    queryFn: getAdminReferralRewards,
+  });
+  const revoke = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => revokeReferralReward(id, reason),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin-referrals-rewards'] });
+      addToast({ type: 'success', message: 'Reward revoked.' });
+    },
+  });
+  if (query.isLoading) return <LoadingSpinner size="lg" />;
+  const rows = query.data ?? [];
+  if (!rows.length) {
+    return <EmptyState icon={Gift} title="No rewards" description="Reward ledger entries will appear here." />;
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((r: AdminRewardRow) => (
+        <Card key={r.id} className="space-y-2">
+          <div className="flex justify-between gap-2">
+            <p className="text-sm font-medium text-tg-text truncate">
+              @{r.username || r.userId.slice(0, 8)} · M{r.milestone}
+            </p>
+            <Badge variant={r.status === 'activated' ? 'success' : r.status === 'revoked' ? 'danger' : 'neutral'}>
+              {r.status}
+            </Badge>
+          </div>
+          <p className="text-xs text-tg-hint">
+            {r.entriesQuantity} entries · {r.hoursQuantity}h · expires{' '}
+            {r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : '—'}
+          </p>
+          {(r.status === 'activated' || r.status === 'issued') && (
+            <Button
+              variant="secondary"
+              className="w-full"
+              loading={revoke.isPending}
+              onClick={() => revoke.mutate({ id: r.id, reason: 'admin_review' })}
+            >
+              Revoke
+            </Button>
+          )}
         </Card>
       ))}
     </div>

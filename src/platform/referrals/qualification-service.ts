@@ -1,16 +1,33 @@
 /**
  * Referral qualification — server-authoritative.
- * A referral becomes QUALIFIED only after PAYG-or-higher confirmed subscription
- * and anti-abuse checks. Refunds/chargebacks invalidate qualification.
+ * A referral becomes QUALIFIED only after PAYG-or-higher confirmed subscription,
+ * within the campaign qualification window, and anti-abuse checks.
+ * Refunds/chargebacks invalidate qualification and reverse dependent rewards.
  */
 import { getPool } from '@/persistence/client';
 import { getLogger } from '@/observability/logger';
 import type { ReferralStatus } from './types';
-import { issueMilestoneRewardsForReferrer } from './reward-service';
+import {
+  issueMilestoneRewardsForReferrer,
+  reverseRewardsAfterInvalidation,
+} from './reward-service';
 
 const logger = getLogger();
 
-/** Plans that do NOT qualify (Observer / free only). */
+/**
+ * Explicit allow-list of qualifying plans (spec §5).
+ * Everything else does NOT qualify unless explicitly listed.
+ */
+const QUALIFYING_PLAN_NAMES = new Set([
+  'pay-as-you-go',
+  'pay as you go',
+  'payg',
+  'pay-g',
+  'starter',
+  'pro',
+  'whale',
+]);
+
 const NON_QUALIFYING_PLAN_NAMES = new Set([
   'observer',
   'free',
@@ -22,22 +39,39 @@ export function isQualifyingPlanName(planName: string | null | undefined): boole
   if (!planName) return false;
   const n = planName.trim().toLowerCase();
   if (NON_QUALIFYING_PLAN_NAMES.has(n)) return false;
-  // Explicit paid tiers
-  if (
-    n.includes('pay') ||
-    n.includes('starter') ||
-    n.includes('pro') ||
-    n.includes('whale') ||
-    n.includes('payg')
-  ) {
-    return true;
+  // Exact / contains match against controlled allow-list only
+  for (const allowed of QUALIFYING_PLAN_NAMES) {
+    if (n === allowed || n.includes(allowed)) return true;
   }
-  // Any other named paid plan qualifies if not free/observer
-  return n.length > 0;
+  return false;
+}
+
+async function getActiveCampaignWindow(): Promise<{
+  campaignId: string | null;
+  windowDays: number;
+}> {
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT id, qualification_window_days
+       FROM referral_campaigns
+       WHERE is_active = TRUE
+       ORDER BY created_at DESC
+       LIMIT 1`
+    );
+    if (!result.rows[0]) return { campaignId: null, windowDays: 7 };
+    return {
+      campaignId: String(result.rows[0].id),
+      windowDays: Number(result.rows[0].qualification_window_days ?? 7),
+    };
+  } catch {
+    return { campaignId: null, windowDays: 7 };
+  }
 }
 
 /**
  * Attempt to qualify a referral for the referred user after successful subscription.
+ * Enforces: PAYG-or-higher plan, anti-abuse, and attribution within qualification window.
  */
 export async function tryQualifyReferral(params: {
   referredUserId: string;
@@ -62,7 +96,8 @@ export async function tryQualifyReferral(params: {
     }
 
     const ref = await pool.query(
-      `SELECT id, referrer_id, status FROM referrals WHERE referred_id = $1 LIMIT 1`,
+      `SELECT id, referrer_id, status, created_at, campaign_id
+       FROM referrals WHERE referred_id = $1 LIMIT 1`,
       [params.referredUserId]
     );
     if (!ref.rows[0]) return { qualified: false, reason: 'no_referral' };
@@ -82,6 +117,27 @@ export async function tryQualifyReferral(params: {
         [ref.rows[0].id]
       );
       return { qualified: false, reason: 'self_referral' };
+    }
+
+    // Enforce qualification window at qualification time (not only at milestone count)
+    const { windowDays } = await getActiveCampaignWindow();
+    const createdAt = new Date(ref.rows[0].created_at as string | Date);
+    const windowMs = windowDays * 24 * 60 * 60 * 1000;
+    if (Date.now() - createdAt.getTime() > windowMs) {
+      await pool.query(
+        `UPDATE referrals SET status = 'REJECTED_INVALID', updated_at = NOW() WHERE id = $1`,
+        [ref.rows[0].id]
+      );
+      await pool.query(
+        `INSERT INTO referral_events (referral_id, user_id, event_type, payload)
+         VALUES ($1, $2, 'rejected_window', $3::jsonb)`,
+        [
+          ref.rows[0].id,
+          params.referredUserId,
+          JSON.stringify({ windowDays, createdAt: createdAt.toISOString() }),
+        ]
+      );
+      return { qualified: false, reason: 'outside_qualification_window' };
     }
 
     await pool.query(
@@ -124,12 +180,12 @@ export async function tryQualifyReferral(params: {
 }
 
 /**
- * Invalidate qualification after refund or chargeback.
+ * Invalidate qualification after refund or chargeback and reverse dependent rewards.
  */
 export async function invalidateReferralForPaymentFailure(params: {
   referredUserId: string;
   reason: 'REJECTED_REFUND' | 'REJECTED_CHARGEBACK';
-}): Promise<{ invalidated: boolean }> {
+}): Promise<{ invalidated: boolean; rewardsReversed: number }> {
   const pool = getPool();
   try {
     const result = await pool.query(
@@ -139,7 +195,7 @@ export async function invalidateReferralForPaymentFailure(params: {
        RETURNING id, referrer_id`,
       [params.referredUserId, params.reason]
     );
-    if (!result.rows[0]) return { invalidated: false };
+    if (!result.rows[0]) return { invalidated: false, rewardsReversed: 0 };
 
     await pool.query(
       `INSERT INTO referral_events (referral_id, user_id, event_type, payload)
@@ -147,20 +203,35 @@ export async function invalidateReferralForPaymentFailure(params: {
       [result.rows[0].id, params.referredUserId, JSON.stringify({ reason: params.reason })]
     );
 
-    // Do not auto-revoke already-issued ledger rewards here without admin review;
-    // mark event for audit. Admin can revoke via reward ledger.
+    const referrerId = String(result.rows[0].referrer_id);
+    let rewardsReversed = 0;
+    try {
+      const rev = await reverseRewardsAfterInvalidation({
+        referrerId,
+        reason: params.reason,
+        sourceReferralId: String(result.rows[0].id),
+      });
+      rewardsReversed = rev.reversed;
+    } catch (err) {
+      logger.warn(
+        { err, referrerId, component: 'ReferralQualification' },
+        'Reward reversal after invalidation failed — admin review required'
+      );
+    }
+
     logger.info(
       {
         component: 'ReferralQualification',
         referredUserId: params.referredUserId,
         reason: params.reason,
+        rewardsReversed,
       },
       'Referral invalidated'
     );
-    return { invalidated: true };
+    return { invalidated: true, rewardsReversed };
   } catch (err) {
     logger.warn({ err, component: 'ReferralQualification' }, 'invalidate failed');
-    return { invalidated: false };
+    return { invalidated: false, rewardsReversed: 0 };
   }
 }
 

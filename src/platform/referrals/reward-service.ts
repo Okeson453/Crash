@@ -1,5 +1,6 @@
 /**
  * Referral reward ledger — promotional entitlements only (not withdrawable cash).
+ * Tenant-scoped, idempotent milestones, configurable expiry, deterministic reversal.
  */
 import { getPool } from '@/persistence/client';
 import { getLogger } from '@/observability/logger';
@@ -13,10 +14,11 @@ import type { ReferrerPlan } from './types';
 const logger = getLogger();
 
 const DEFAULT_REWARD_EXPIRY_DAYS = 30;
+const DEFAULT_WINDOW_DAYS = 7;
 
 export async function countQualifiedInWindow(
   referrerId: string,
-  windowDays = 7
+  windowDays = DEFAULT_WINDOW_DAYS
 ): Promise<number> {
   const pool = getPool();
   const result = await pool.query(
@@ -42,17 +44,47 @@ async function resolveReferrerPlan(referrerId: string): Promise<ReferrerPlan> {
   return normalizePlanName(result.rows[0]?.plan_name ? String(result.rows[0].plan_name) : null);
 }
 
-async function activeCampaignId(): Promise<string | null> {
+async function activeCampaignConfig(): Promise<{
+  campaignId: string | null;
+  windowDays: number;
+  rewardExpiryDays: number;
+}> {
   const pool = getPool();
-  const result = await pool.query(
-    `SELECT id FROM referral_campaigns WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 1`
-  );
-  return result.rows[0]?.id ? String(result.rows[0].id) : null;
+  try {
+    const result = await pool.query(
+      `SELECT id, qualification_window_days,
+              COALESCE(reward_expiry_days, $1) AS reward_expiry_days
+       FROM referral_campaigns
+       WHERE is_active = TRUE
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [DEFAULT_REWARD_EXPIRY_DAYS]
+    );
+    if (!result.rows[0]) {
+      return {
+        campaignId: null,
+        windowDays: DEFAULT_WINDOW_DAYS,
+        rewardExpiryDays: DEFAULT_REWARD_EXPIRY_DAYS,
+      };
+    }
+    return {
+      campaignId: String(result.rows[0].id),
+      windowDays: Number(result.rows[0].qualification_window_days ?? DEFAULT_WINDOW_DAYS),
+      rewardExpiryDays: Number(result.rows[0].reward_expiry_days ?? DEFAULT_REWARD_EXPIRY_DAYS),
+    };
+  } catch {
+    return {
+      campaignId: null,
+      windowDays: DEFAULT_WINDOW_DAYS,
+      rewardExpiryDays: DEFAULT_REWARD_EXPIRY_DAYS,
+    };
+  }
 }
 
 /**
  * Issue any newly reached milestones for the referrer into the reward ledger.
  * Incremental: each milestone issued at most once per campaign.
+ * tenant_id is set to the personal tenant (user_id) for isolation.
  */
 export async function issueMilestoneRewardsForReferrer(referrerId: string): Promise<{
   issued: number[];
@@ -61,12 +93,11 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
   const issued: number[] = [];
 
   try {
-    const campaignId = await activeCampaignId();
-    const windowDays = 7;
-    const qualifiedCount = await countQualifiedInWindow(referrerId, windowDays);
+    const campaign = await activeCampaignConfig();
+    const qualifiedCount = await countQualifiedInWindow(referrerId, campaign.windowDays);
     const plan = await resolveReferrerPlan(referrerId);
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + DEFAULT_REWARD_EXPIRY_DAYS);
+    expiresAt.setDate(expiresAt.getDate() + campaign.rewardExpiryDays);
 
     for (const milestone of listMilestones()) {
       if (qualifiedCount < milestone) continue;
@@ -77,11 +108,11 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
       try {
         const insert = await pool.query(
           `INSERT INTO referral_reward_ledger (
-             user_id, campaign_id, milestone, reward_type, quantity,
+             user_id, tenant_id, campaign_id, milestone, reward_type, quantity,
              entries_quantity, hours_quantity, issued_at, activated_at, expires_at,
              status, source_event
            ) VALUES (
-             $1, $2, $3, $4, $5,
+             $1, $1, $2, $3, $4, $5,
              $6, $7, NOW(), NOW(), $8,
              'activated', 'milestone_reached'
            )
@@ -89,7 +120,7 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
            RETURNING id, milestone`,
           [
             referrerId,
-            campaignId,
+            campaign.campaignId,
             milestone,
             reward.rewardType,
             reward.entries + reward.hours,
@@ -111,6 +142,7 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
                 entries: reward.entries,
                 hours: reward.hours,
                 ledgerId: insert.rows[0].id,
+                tenantId: referrerId,
               }),
             ]
           );
@@ -123,14 +155,19 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
       }
     }
 
-    // Mark qualified referrals as REWARD_COUNTED when max milestone fully paid
+    // Mark qualified referrals as REWARD_COUNTED when any milestone issued
     if (issued.length > 0) {
       await pool.query(
         `UPDATE referrals SET status = 'REWARD_COUNTED', updated_at = NOW()
          WHERE referrer_id = $1 AND status = 'QUALIFIED'
            AND qualified_at >= NOW() - ($2 || ' days')::interval`,
-        [referrerId, String(windowDays)]
+        [referrerId, String(campaign.windowDays)]
       );
+      try {
+        await refreshPromotionalEntitlements(referrerId);
+      } catch {
+        /* best-effort */
+      }
     }
 
     if (issued.length) {
@@ -146,6 +183,101 @@ export async function issueMilestoneRewardsForReferrer(referrerId: string): Prom
   return { issued };
 }
 
+/**
+ * After a referral is invalidated (refund/chargeback), recalculate valid qualified
+ * count and revoke any milestone rewards that are no longer earned.
+ */
+export async function reverseRewardsAfterInvalidation(params: {
+  referrerId: string;
+  reason: string;
+  sourceReferralId: string;
+}): Promise<{ reversed: number }> {
+  const pool = getPool();
+  let reversed = 0;
+
+  try {
+    const campaign = await activeCampaignConfig();
+    const stillQualified = await countQualifiedInWindow(params.referrerId, campaign.windowDays);
+
+    // Find activated/issued rewards whose milestone is no longer reached
+    const ledger = await pool.query(
+      `SELECT id, milestone, entries_quantity, hours_quantity, entries_used, hours_used
+       FROM referral_reward_ledger
+       WHERE user_id = $1
+         AND status IN ('issued','activated')
+         AND (campaign_id IS NULL OR campaign_id = $2 OR $2 IS NULL)
+       ORDER BY milestone DESC`,
+      [params.referrerId, campaign.campaignId]
+    );
+
+    for (const row of ledger.rows) {
+      const milestone = Number(row.milestone);
+      if (stillQualified >= milestone) continue;
+
+      // Milestone no longer earned — revoke
+      const upd = await pool.query(
+        `UPDATE referral_reward_ledger
+         SET status = 'revoked',
+             audit_reference = COALESCE(audit_reference, '') || $2
+         WHERE id = $1 AND status IN ('issued','activated')
+         RETURNING id`,
+        [
+          row.id,
+          `|reversed:${params.reason}:referral:${params.sourceReferralId}:at:${new Date().toISOString()}`,
+        ]
+      );
+      if (upd.rows[0]) {
+        reversed += 1;
+        await pool.query(
+          `INSERT INTO referral_events (user_id, event_type, payload)
+           VALUES ($1, 'reward_reversed', $2::jsonb)`,
+          [
+            params.referrerId,
+            JSON.stringify({
+              rewardId: row.id,
+              milestone,
+              reason: params.reason,
+              sourceReferralId: params.sourceReferralId,
+              stillQualified,
+            }),
+          ]
+        );
+      }
+    }
+
+    // Demote REWARD_COUNTED back to QUALIFIED when count still > 0 but some rewards revoked
+    if (stillQualified > 0) {
+      await pool.query(
+        `UPDATE referrals SET status = 'QUALIFIED', updated_at = NOW()
+         WHERE referrer_id = $1 AND status = 'REWARD_COUNTED'
+           AND qualified_at IS NOT NULL`,
+        [params.referrerId]
+      );
+    }
+
+    await refreshPromotionalEntitlements(params.referrerId);
+
+    if (reversed > 0) {
+      logger.info(
+        {
+          component: 'ReferralRewards',
+          referrerId: params.referrerId,
+          reversed,
+          stillQualified,
+        },
+        'Rewards reversed after invalidation'
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err, referrerId: params.referrerId, component: 'ReferralRewards' },
+      'reverseRewardsAfterInvalidation failed'
+    );
+  }
+
+  return { reversed };
+}
+
 export async function expireDueRewards(): Promise<number> {
   const pool = getPool();
   try {
@@ -155,8 +287,18 @@ export async function expireDueRewards(): Promise<number> {
        WHERE status IN ('issued','activated')
          AND expires_at IS NOT NULL
          AND expires_at < NOW()
-       RETURNING id`
+       RETURNING id, user_id`
     );
+    const userIds = new Set(
+      (result.rows as Array<{ user_id: string }>).map((r) => String(r.user_id))
+    );
+    for (const uid of userIds) {
+      try {
+        await refreshPromotionalEntitlements(uid);
+      } catch {
+        /* best-effort */
+      }
+    }
     return result.rowCount ?? 0;
   } catch {
     return 0;
@@ -186,6 +328,11 @@ export async function revokeReward(params: {
         JSON.stringify({ rewardId: params.rewardId, reason: params.reason, actorId: params.actorId }),
       ]
     );
+    try {
+      await refreshPromotionalEntitlements(String(result.rows[0].user_id));
+    } catch {
+      /* best-effort */
+    }
     return true;
   } catch {
     return false;
@@ -203,6 +350,7 @@ export interface UserRewardView {
   status: string;
   issuedAt: string;
   expiresAt: string | null;
+  tenantId?: string | null;
 }
 
 export async function listUserRewards(userId: string): Promise<UserRewardView[]> {
@@ -211,7 +359,7 @@ export async function listUserRewards(userId: string): Promise<UserRewardView[]>
     const result = await pool.query(
       `SELECT id, milestone, reward_type, entries_quantity, hours_quantity,
               COALESCE(entries_used, 0) AS entries_used, COALESCE(hours_used, 0) AS hours_used,
-              status, issued_at, expires_at
+              status, issued_at, expires_at, tenant_id
        FROM referral_reward_ledger
        WHERE user_id = $1
        ORDER BY issued_at DESC
@@ -229,12 +377,12 @@ export async function listUserRewards(userId: string): Promise<UserRewardView[]>
       status: String(row.status),
       issuedAt: new Date(row.issued_at as string | Date).toISOString(),
       expiresAt: row.expires_at ? new Date(row.expires_at as string | Date).toISOString() : null,
+      tenantId: row.tenant_id ? String(row.tenant_id) : null,
     }));
   } catch {
     return [];
   }
 }
-
 
 /**
  * Remaining promotional entitlements for a user (sum of activated, non-expired rewards).

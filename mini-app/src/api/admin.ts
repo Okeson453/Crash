@@ -212,7 +212,33 @@ export interface ReferralCampaign {
   endsAt: string | null;
   minPlan: string;
   notes: string | null;
+  rewardExpiryDays?: number;
   createdAt: string;
+}
+
+export interface AdminReferralRow {
+  id: string;
+  referrerId: string;
+  referredId: string;
+  status: string;
+  createdAt: string;
+  qualifiedAt: string | null;
+  referrerUsername?: string | null;
+  referredUsername?: string | null;
+}
+
+export interface AdminRewardRow {
+  id: string;
+  userId: string;
+  tenantId: string | null;
+  milestone: number;
+  rewardType: string;
+  entriesQuantity: number;
+  hoursQuantity: number;
+  status: string;
+  issuedAt: string;
+  expiresAt: string | null;
+  username?: string | null;
 }
 
 export interface FraudSignal {
@@ -255,6 +281,9 @@ export async function updateReferralCampaignRules(
     milestones?: number[];
     minPlan?: string;
     notes?: string;
+    rewardExpiryDays?: number;
+    startsAt?: string | null;
+    endsAt?: string | null;
   }
 ): Promise<ReferralCampaign> {
   return api.put<ReferralCampaign>(`/api/v1/admin/referrals/campaigns/${id}/rules`, rules);
@@ -262,4 +291,20 @@ export async function updateReferralCampaignRules(
 
 export async function getReferralFraudSignals(): Promise<FraudSignal[]> {
   return api.get<FraudSignal[]>('/api/v1/admin/referrals/fraud');
+}
+
+export async function getAdminQualifiedReferrals(): Promise<AdminReferralRow[]> {
+  return api.get<AdminReferralRow[]>('/api/v1/admin/referrals/qualified');
+}
+
+export async function getAdminPendingReferrals(): Promise<AdminReferralRow[]> {
+  return api.get<AdminReferralRow[]>('/api/v1/admin/referrals/pending');
+}
+
+export async function getAdminReferralRewards(): Promise<AdminRewardRow[]> {
+  return api.get<AdminRewardRow[]>('/api/v1/admin/referrals/rewards');
+}
+
+export async function revokeReferralReward(id: string, reason: string): Promise<void> {
+  return api.post<void>(`/api/v1/admin/referrals/rewards/${id}/revoke`, { reason });
 }
