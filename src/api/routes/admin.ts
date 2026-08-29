@@ -372,7 +372,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data: configHistory.slice(-50).reverse() });
   });
 
-  fastify.get('/compliance/rg, async (_request, reply) => {
+  fastify.get('/compliance/rg', async (_request, reply) => {
+    runtimeAdminSettings.rg = await loadAdminSetting('rg', runtimeAdminSettings.rg);
     reply.send({ data: runtimeAdminSettings.rg });
   });
 
