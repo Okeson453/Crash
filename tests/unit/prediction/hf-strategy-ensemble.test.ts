@@ -124,12 +124,13 @@ describe('expanded PSI ensemble models', () => {
   });
 });
 
-describe('500 entry capacity math', () => {
-  it('supports 500 entries within a day at ~35s average spacing', () => {
+describe('engine throughput capacity (not subscriber plan limits)', () => {
+  it('decision cadence can sustain 500 engine entries/day', () => {
     const secondsPerDay = 86400;
-    const entries = 500;
-    const avgSpacingSec = secondsPerDay / entries;
-    expect(avgSpacingSec).toBeLessThanOrEqual(180); // feasible vs crash cadence
-    expect(entries).toBeGreaterThanOrEqual(500);
+    const engineEntries = 500;
+    const avgSpacingSec = secondsPerDay / engineEntries;
+    // Crash rounds are frequent enough that ~3 min average spacing is feasible
+    expect(avgSpacingSec).toBeLessThanOrEqual(180);
+    expect(engineEntries).toBe(500);
   });
 });
