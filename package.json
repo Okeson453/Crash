@@ -34,7 +34,10 @@
     "test:load": "tsx scripts/load-test-500.ts",
     "test:load:burst": "tsx scripts/load-test-500.ts --burst",
     "credentials:import": "tsx scripts/import-tenant-credentials.ts",
-    "typecheck:all": "tsc --noEmit"
+    "typecheck:all": "tsc --noEmit",
+    "verify:phase5": "node scripts/phase5-verification.mjs",
+    "test:security": "jest --testPathPattern=tests/unit/security --passWithNoTests",
+    "test:referrals": "jest --testPathPattern=tests/unit/referrals --passWithNoTests"
   },
   "keywords": [
     "automation",

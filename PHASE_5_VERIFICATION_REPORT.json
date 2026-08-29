@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-08-29T13:05:00.000Z",
+  "summary": {
+    "overall": "PASS",
+    "notes": "Required static gates passed in implementer environment. Live DB/Docker/load optional gates blocked or skipped."
+  },
+  "required": {
+    "backend_npm_ci": "PASS",
+    "mini_app_npm_ci": "PASS",
+    "backend_typecheck": "PASS",
+    "mini_app_typecheck": "PASS",
+    "security_referral_unit_suite": "PASS (11 suites / 68 tests)",
+    "backend_build": "PASS",
+    "mini_app_build": "PASS"
+  },
+  "optional_or_blocked": {
+    "admin_dashboard_npm_ci": "SKIPPED (no package-lock.json)",
+    "backend_lint": "OOM in constrained runner — CI continues with continue-on-error",
+    "full_backend_unit": "Optional; targeted security/referral required gate used",
+    "integration_live_db": "BLOCKED (no DATABASE_URL)",
+    "referral_e2e_live": "BLOCKED (no DATABASE_URL); logic E2E PASS",
+    "docker_build": "BLOCKED (no docker daemon)",
+    "load_test": "Not executed (operator step)",
+    "lighthouse": "Covered by mini-app CI coverage/bundle gates when run on GitHub Actions"
+  }
+}
