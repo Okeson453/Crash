@@ -192,6 +192,13 @@ export interface AdminSessionState {
   }>;
 }
 
+export interface ConfigHistoryEntry {
+  id: string;
+  description: string;
+  actorName: string;
+  createdAt: string;
+}
+
 export interface AdminConfig {
   stakePerEntry: number;
   cashOutTarget: number;
@@ -240,7 +247,10 @@ export interface HealthStatus {
   }>;
   timestamp: string;
   version: string;
+  uptimeSeconds?: number;
 }
+
+export type HealthCheck = HealthStatus['checks'][number];
 
 export type WebSocketEventType =
   | 'game:state'

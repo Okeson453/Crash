@@ -1,5 +1,6 @@
 import { api } from './client';
 import type {
+  ConfigHistoryEntry,
   AdminSessionState,
   AdminConfig,
   AdminOverview,
@@ -188,4 +189,13 @@ export async function testWebhook(url: string): Promise<{ ok: boolean; message?:
     '/api/v1/admin/integrations/telegram/webhook/test',
     { url }
   );
+}
+
+
+export async function getAdminConfigHistory(): Promise<ConfigHistoryEntry[]> {
+  try {
+    return await api.get<ConfigHistoryEntry[]>('/api/v1/admin/config/history');
+  } catch {
+    return [];
+  }
 }

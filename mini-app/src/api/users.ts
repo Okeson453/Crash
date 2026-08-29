@@ -43,3 +43,26 @@ export async function updateUserPreferences(
 export async function getBalance(): Promise<BalanceResponse> {
   return api.get<BalanceResponse>('/api/v1/users/me/balance');
 }
+
+export interface AppNotification {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export async function getNotifications(unreadOnly = false): Promise<AppNotification[]> {
+  const q = unreadOnly ? '?unread=true' : '';
+  return api.get<AppNotification[]>(`/api/v1/users/me/notifications${q}`);
+}
+
+export async function markNotificationRead(id: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>(`/api/v1/users/me/notifications/${id}/read`);
+}
+
+export async function markAllNotificationsRead(): Promise<{ count: number }> {
+  return api.post<{ count: number }>('/api/v1/users/me/notifications/read-all');
+}

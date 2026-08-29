@@ -66,6 +66,11 @@ export async function startControlPlane(): Promise<ControlPlaneHandles> {
         if (expired > 0) {
           logger.info({ component: 'ControlPlane', expired }, 'Expired subscriptions cleaned');
         }
+        const { expireDueRewards } = await import('./referrals/reward-service.js');
+        const rewardsExpired = await expireDueRewards();
+        if (rewardsExpired > 0) {
+          logger.info({ component: 'ControlPlane', rewardsExpired }, 'Expired referral rewards');
+        }
       } catch (err) {
         logger.error({ component: 'ControlPlane', error: String(err) }, 'Sweep failed');
       }

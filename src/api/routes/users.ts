@@ -4,6 +4,11 @@ import { authenticateRequest } from '@/api/middleware/auth';
 import { getTenantManager } from '@/app/composition';
 import { paginationSchema } from '@/api/validators/common';
 import { getPool } from '@/persistence/client';
+import {
+  listUserNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} from '@/platform/notifications/user-notification-service';
 import type { Tenant } from '@/platform/types';
 
 const updateProfileSchema = z.object({ email: z.string().email().optional(), timezone: z.string().min(1).max(64).optional() });
@@ -25,4 +30,23 @@ export async function usersRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/me/preferences', { preHandler: authenticateRequest }, async (request, reply) => { const result = await getPool().query('SELECT data FROM mini_app_preferences WHERE user_id=$1', [request.auth.userId]); const stored = result.rows[0]?.data; const data = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...DEFAULT_PREFERENCES, ...stored } : DEFAULT_PREFERENCES; reply.send({ data }); });
   fastify.put('/me/preferences', { preHandler: authenticateRequest }, async (request, reply) => { const body = preferencesSchema.parse(request.body); const existing = await getPool().query('SELECT data FROM mini_app_preferences WHERE user_id=$1', [request.auth.userId]); const prior = existing.rows[0]?.data; const merged = prior && typeof prior === 'object' && !Array.isArray(prior) ? { ...DEFAULT_PREFERENCES, ...prior, ...body } : { ...DEFAULT_PREFERENCES, ...body }; await getPool().query('INSERT INTO mini_app_preferences (user_id,data,updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (user_id) DO UPDATE SET data=EXCLUDED.data,updated_at=NOW()', [request.auth.userId, JSON.stringify(merged)]); reply.send({ data: merged }); });
   fastify.get('/me/balance', { preHandler: authenticateRequest }, async (request, reply) => { const result=await getPool().query('SELECT balance,currency,updated_at FROM mini_app_balances WHERE user_id=$1',[request.auth.userId]); const row=result.rows[0]; reply.send({data:{balance:Number(row?.balance??0),currency:String(row?.currency??'USD'),currencySymbol:'$',updatedAt:row?.updated_at?new Date(row.updated_at as string|number|Date).toISOString():new Date().toISOString()}}); });
+
+
+  fastify.get('/me/notifications', { preHandler: authenticateRequest }, async (request, reply) => {
+    const unreadOnly = (request.query as { unread?: string })?.unread === 'true';
+    const data = await listUserNotifications(request.auth.userId, { unreadOnly, limit: 50 });
+    reply.send({ data });
+  });
+
+  fastify.post('/me/notifications/:id/read', { preHandler: authenticateRequest }, async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const ok = await markNotificationRead(request.auth.userId, id);
+    reply.send({ data: { ok } });
+  });
+
+  fastify.post('/me/notifications/read-all', { preHandler: authenticateRequest }, async (request, reply) => {
+    const count = await markAllNotificationsRead(request.auth.userId);
+    reply.send({ data: { count } });
+  });
+
 }

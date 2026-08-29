@@ -198,6 +198,8 @@ export interface UserRewardView {
   rewardType: string;
   entriesQuantity: number;
   hoursQuantity: number;
+  entriesUsed: number;
+  hoursUsed: number;
   status: string;
   issuedAt: string;
   expiresAt: string | null;
@@ -207,7 +209,9 @@ export async function listUserRewards(userId: string): Promise<UserRewardView[]>
   const pool = getPool();
   try {
     const result = await pool.query(
-      `SELECT id, milestone, reward_type, entries_quantity, hours_quantity, status, issued_at, expires_at
+      `SELECT id, milestone, reward_type, entries_quantity, hours_quantity,
+              COALESCE(entries_used, 0) AS entries_used, COALESCE(hours_used, 0) AS hours_used,
+              status, issued_at, expires_at
        FROM referral_reward_ledger
        WHERE user_id = $1
        ORDER BY issued_at DESC
@@ -220,11 +224,101 @@ export async function listUserRewards(userId: string): Promise<UserRewardView[]>
       rewardType: String(row.reward_type),
       entriesQuantity: Number(row.entries_quantity ?? 0),
       hoursQuantity: Number(row.hours_quantity ?? 0),
+      entriesUsed: Number(row.entries_used ?? 0),
+      hoursUsed: Number(row.hours_used ?? 0),
       status: String(row.status),
       issuedAt: new Date(row.issued_at as string | Date).toISOString(),
       expiresAt: row.expires_at ? new Date(row.expires_at as string | Date).toISOString() : null,
     }));
   } catch {
     return [];
+  }
+}
+
+
+/**
+ * Remaining promotional entitlements for a user (sum of activated, non-expired rewards).
+ */
+export async function getAvailableEntitlements(userId: string): Promise<{
+  bonusEntries: number;
+  bonusHours: number;
+}> {
+  const pool = getPool();
+  try {
+    const result = await pool.query(
+      `SELECT
+         COALESCE(SUM(GREATEST(entries_quantity - COALESCE(entries_used, 0), 0)), 0)::int AS entries,
+         COALESCE(SUM(GREATEST(hours_quantity - COALESCE(hours_used, 0), 0)), 0)::float AS hours
+       FROM referral_reward_ledger
+       WHERE user_id = $1
+         AND status = 'activated'
+         AND (expires_at IS NULL OR expires_at > NOW())`,
+      [userId]
+    );
+    return {
+      bonusEntries: Number(result.rows[0]?.entries ?? 0),
+      bonusHours: Number(result.rows[0]?.hours ?? 0),
+    };
+  } catch {
+    return { bonusEntries: 0, bonusHours: 0 };
+  }
+}
+
+/**
+ * Consume bonus entries for a game play. FIFO by expires_at.
+ */
+export async function consumeBonusEntries(
+  userId: string,
+  count = 1,
+  client?: { query: (sql: string, params?: unknown[]) => Promise<{ rowCount: number | null; rows: unknown[] }> }
+): Promise<boolean> {
+  if (count <= 0) return true;
+  const q = client ?? getPool();
+  let remaining = count;
+
+  const rows = await q.query(
+    `SELECT id, entries_quantity, COALESCE(entries_used, 0) AS entries_used
+     FROM referral_reward_ledger
+     WHERE user_id = $1
+       AND status = 'activated'
+       AND (expires_at IS NULL OR expires_at > NOW())
+       AND entries_quantity > COALESCE(entries_used, 0)
+     ORDER BY expires_at NULLS LAST, issued_at ASC
+     FOR UPDATE`,
+    [userId]
+  );
+
+  for (const row of rows.rows as Array<{ id: string; entries_quantity: number; entries_used: number }>) {
+    if (remaining <= 0) break;
+    const available = Number(row.entries_quantity) - Number(row.entries_used);
+    if (available <= 0) continue;
+    const take = Math.min(available, remaining);
+    await q.query(
+      `UPDATE referral_reward_ledger
+       SET entries_used = COALESCE(entries_used, 0) + $2
+       WHERE id = $1`,
+      [row.id, take]
+    );
+    remaining -= take;
+  }
+
+  return remaining === 0;
+}
+
+export async function refreshPromotionalEntitlements(userId: string): Promise<void> {
+  const pool = getPool();
+  const avail = await getAvailableEntitlements(userId);
+  try {
+    await pool.query(
+      `INSERT INTO user_promotional_entitlements (user_id, bonus_entries, bonus_hours, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         bonus_entries = EXCLUDED.bonus_entries,
+         bonus_hours = EXCLUDED.bonus_hours,
+         updated_at = NOW()`,
+      [userId, avail.bonusEntries, avail.bonusHours]
+    );
+  } catch {
+    /* table may not exist yet before migration */
   }
 }

@@ -297,7 +297,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data: runtimeAdminSettings.tenant.limits });
   });
 
-  fastify.get('/compliance/rg', async (_request, reply) => {
+  const configHistory: Array<{ id: string; description: string; actorName: string; createdAt: string }> = [];
+
+  fastify.get('/config/history', async (_request, reply) => {
+    reply.send({ data: configHistory.slice(-50).reverse() });
+  });
+
+  fastify.get('/compliance/rg, async (_request, reply) => {
     reply.send({ data: runtimeAdminSettings.rg });
   });
 

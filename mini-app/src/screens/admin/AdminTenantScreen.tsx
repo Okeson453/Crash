@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { getTenantSettings } from '@/api/admin';
 import { TenantIdentityForm } from '@/components/admin/TenantIdentityForm';
+import { TenantBrandingForm } from '@/components/admin/TenantBrandingForm';
+import { TenantLimitsForm } from '@/components/admin/TenantLimitsForm';
 import { LoadingSpinner } from '@/components/ui/Spinner';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Card } from '@/components/ui/Card';
 import { Building2 } from 'lucide-react';
 
 export function AdminTenantScreen() {
@@ -28,33 +29,8 @@ export function AdminTenantScreen() {
   return (
     <div className="space-y-4">
       <TenantIdentityForm identity={identity} />
-      <Card className="space-y-2">
-        <p className="text-sm font-semibold text-tg-text">Branding</p>
-        <p className="text-xs text-tg-hint">Primary: {branding.primaryColor}</p>
-        <p className="text-xs text-tg-hint">Accent: {branding.accentColor}</p>
-        <p className="text-xs text-tg-hint truncate">Logo: {branding.logoUrl || '—'}</p>
-      </Card>
-      <Card className="space-y-2">
-        <p className="text-sm font-semibold text-tg-text">Limits</p>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div>
-            <p className="text-xs text-tg-hint">Currency</p>
-            <p className="font-medium text-tg-text">{limits.currency}</p>
-          </div>
-          <div>
-            <p className="text-xs text-tg-hint">Min bet</p>
-            <p className="font-medium text-tg-text">{limits.minBet}</p>
-          </div>
-          <div>
-            <p className="text-xs text-tg-hint">Max bet</p>
-            <p className="font-medium text-tg-text">{limits.maxBet}</p>
-          </div>
-          <div>
-            <p className="text-xs text-tg-hint">Max daily wager</p>
-            <p className="font-medium text-tg-text">{limits.maxDailyWager}</p>
-          </div>
-        </div>
-      </Card>
+      <TenantBrandingForm branding={branding} />
+      <TenantLimitsForm limits={limits} />
     </div>
   );
 }
