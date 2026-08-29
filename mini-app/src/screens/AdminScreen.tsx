@@ -18,13 +18,27 @@ import { AdminBillingScreen } from './admin/AdminBillingScreen';
 import { AdminComplianceScreen } from './admin/AdminComplianceScreen';
 import { AdminIntegrationsScreen } from './admin/AdminIntegrationsScreen';
 import { AdminReferralsScreen } from './admin/AdminReferralsScreen';
+import { AdminSessionsScreen } from './admin/AdminSessionsScreen';
+import { AdminActiveBetsScreen } from './admin/AdminActiveBetsScreen';
+import { AdminRiskScreen } from './admin/AdminRiskScreen';
+import { AdminTransactionsScreen } from './admin/AdminTransactionsScreen';
+import { AdminLogsScreen } from './admin/AdminLogsScreen';
+import { AdminAlertsScreen } from './admin/AdminAlertsScreen';
+import { AdminFeatureFlagsScreen } from './admin/AdminFeatureFlagsScreen';
 
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Users' },
   { id: 'engines', label: 'Engines' },
+  { id: 'sessions', label: 'Sessions' },
+  { id: 'bets', label: 'Active Bets' },
+  { id: 'risk', label: 'Risk' },
+  { id: 'transactions', label: 'Transactions' },
   { id: 'config', label: 'Config' },
   { id: 'health', label: 'Health' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'flags', label: 'Flags' },
   { id: 'audit', label: 'Audit' },
   { id: 'tenant', label: 'Tenant' },
   { id: 'billing', label: 'Billing' },
@@ -53,8 +67,15 @@ export function AdminScreen() {
       {activeTab === 'overview' && <AdminOverviewScreen />}
       {activeTab === 'users' && <AdminUsersScreen />}
       {activeTab === 'engines' && <AdminEnginesScreen />}
+      {activeTab === 'sessions' && <AdminSessionsScreen />}
+      {activeTab === 'bets' && <AdminActiveBetsScreen />}
+      {activeTab === 'risk' && <AdminRiskScreen />}
+      {activeTab === 'transactions' && <AdminTransactionsScreen />}
       {activeTab === 'config' && <AdminConfigScreen />}
       {activeTab === 'health' && <AdminHealthScreen />}
+      {activeTab === 'logs' && <AdminLogsScreen />}
+      {activeTab === 'alerts' && <AdminAlertsScreen />}
+      {activeTab === 'flags' && <AdminFeatureFlagsScreen />}
       {activeTab === 'audit' && <AdminAuditScreen />}
       {activeTab === 'tenant' && <AdminTenantScreen />}
       {activeTab === 'billing' && <AdminBillingScreen />}

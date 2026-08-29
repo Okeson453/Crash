@@ -308,3 +308,121 @@ export async function getAdminReferralRewards(): Promise<AdminRewardRow[]> {
 export async function revokeReferralReward(id: string, reason: string): Promise<void> {
   return api.post<void>(`/api/v1/admin/referrals/rewards/${id}/revoke`, { reason });
 }
+
+// ── Phase 4 operational surfaces ─────────────────────────────────────────────
+
+export interface AdminBrowserSession {
+  id: string;
+  status: string;
+  mode: string;
+  browserProfileId: string | null;
+  operatorId: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  notes: string | null;
+}
+
+export interface AdminActiveBet {
+  id: string;
+  userId: string;
+  username: string | null;
+  amount: number;
+  autoCashout: number | null;
+  state: string;
+  roundId: string | null;
+  cashoutMultiplier: number | null;
+  pnl: number | null;
+  createdAt: string;
+}
+
+export interface AdminRiskSummary {
+  activeBetCount: number;
+  activeExposure: number;
+  pendingBetCount: number;
+  dailyLossEstimate: number;
+  openSessions: number;
+  highStakeBets: number;
+  recentRejectedFraud: number;
+  limits: {
+    maxDailyLoss: number | null;
+    maxSessionHours: number | null;
+    betCooldownMinutes: number | null;
+  };
+}
+
+export interface AdminTransaction {
+  id: string;
+  userId: string | null;
+  username: string | null;
+  type: string;
+  amount: number;
+  status: string;
+  reference: string | null;
+  createdAt: string;
+}
+
+export interface AdminLogEntry {
+  id: string;
+  source: string;
+  level: string;
+  message: string;
+  actorId: string | null;
+  createdAt: string;
+}
+
+export interface AdminAlert {
+  id: string;
+  severity: 'info' | 'warning' | 'critical';
+  component: string;
+  message: string;
+  acknowledged: boolean;
+  createdAt: string;
+}
+
+export interface FeatureFlag {
+  key: string;
+  enabled: boolean;
+  scope: string;
+  description: string;
+  updatedAt: string | null;
+}
+
+export async function getAdminBrowserSessions(): Promise<AdminBrowserSession[]> {
+  return api.get<AdminBrowserSession[]>('/api/v1/admin/sessions');
+}
+
+export async function terminateAdminSession(id: string): Promise<void> {
+  return api.post<void>(`/api/v1/admin/sessions/${id}/terminate`);
+}
+
+export async function getAdminActiveBets(): Promise<AdminActiveBet[]> {
+  return api.get<AdminActiveBet[]>('/api/v1/admin/bets/active');
+}
+
+export async function getAdminRiskSummary(): Promise<AdminRiskSummary> {
+  return api.get<AdminRiskSummary>('/api/v1/admin/risk');
+}
+
+export async function getAdminTransactions(): Promise<AdminTransaction[]> {
+  return api.get<AdminTransaction[]>('/api/v1/admin/transactions');
+}
+
+export async function getAdminLogs(): Promise<AdminLogEntry[]> {
+  return api.get<AdminLogEntry[]>('/api/v1/admin/logs');
+}
+
+export async function getAdminAlerts(): Promise<AdminAlert[]> {
+  return api.get<AdminAlert[]>('/api/v1/admin/alerts');
+}
+
+export async function acknowledgeAdminAlert(id: string): Promise<void> {
+  return api.post<void>(`/api/v1/admin/alerts/${id}/acknowledge`);
+}
+
+export async function getFeatureFlags(): Promise<FeatureFlag[]> {
+  return api.get<FeatureFlag[]>('/api/v1/admin/feature-flags');
+}
+
+export async function setFeatureFlagEnabled(key: string, enabled: boolean): Promise<FeatureFlag> {
+  return api.put<FeatureFlag>(`/api/v1/admin/feature-flags/${encodeURIComponent(key)}`, { enabled });
+}

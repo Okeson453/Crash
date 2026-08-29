@@ -33,6 +33,18 @@ import {
 } from '@/platform/referrals/admin-referral-service';
 import { loadAdminSetting, saveAdminSetting } from '@/platform/admin-settings-store';
 import { revokeReward } from '@/platform/referrals/reward-service';
+import {
+  listBrowserSessions,
+  terminateBrowserSession,
+  listActiveBets,
+  getRiskSummary,
+  listTransactions,
+  listAdminLogs,
+  listAlerts,
+  acknowledgeAlert,
+  listFeatureFlags,
+  setFeatureFlag,
+} from '@/platform/admin-ops-service';
 
 const configSchema = z.object({
   stakePerEntry: z.number().positive().optional(),
@@ -436,5 +448,68 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const body = z.object({ url: z.string().max(500).optional() }).parse(request.body ?? {});
     const url = body.url || runtimeAdminSettings.telegramWebhook;
     reply.send({ data: { ok: Boolean(url), url: url ?? null, message: url ? 'Webhook URL recorded' : 'No webhook URL' } });
+  });
+
+  // ── Phase 4 operational surfaces ──────────────────────────────────────────
+  fastify.get('/sessions', async (_request, reply) => {
+    const data = await listBrowserSessions(50);
+    reply.send({ data });
+  });
+
+  fastify.post('/sessions/:id/terminate', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const ok = await terminateBrowserSession(id);
+    if (!ok) {
+      reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Session not found or already stopped' } });
+      return;
+    }
+    reply.send({ data: { terminated: true } });
+  });
+
+  fastify.get('/bets/active', async (_request, reply) => {
+    const data = await listActiveBets(100);
+    reply.send({ data });
+  });
+
+  fastify.get('/risk', async (_request, reply) => {
+    const data = await getRiskSummary();
+    reply.send({ data });
+  });
+
+  fastify.get('/transactions', async (_request, reply) => {
+    const data = await listTransactions(100);
+    reply.send({ data });
+  });
+
+  fastify.get('/logs', async (_request, reply) => {
+    const data = await listAdminLogs(100);
+    reply.send({ data });
+  });
+
+  fastify.get('/alerts', async (_request, reply) => {
+    const data = await listAlerts();
+    reply.send({ data });
+  });
+
+  fastify.post('/alerts/:id/acknowledge', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const ok = await acknowledgeAlert(id, request.auth.userId);
+    reply.send({ data: { acknowledged: ok } });
+  });
+
+  fastify.get('/feature-flags', async (_request, reply) => {
+    const data = await listFeatureFlags();
+    reply.send({ data });
+  });
+
+  fastify.put('/feature-flags/:key', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const body = z.object({ enabled: z.boolean() }).parse(request.body);
+    const data = await setFeatureFlag(key, body.enabled, request.auth.userId);
+    if (!data) {
+      reply.status(500).send({ error: { code: 'UPDATE_FAILED', message: 'Could not update flag' } });
+      return;
+    }
+    reply.send({ data });
   });
 }
