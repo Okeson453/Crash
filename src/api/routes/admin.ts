@@ -21,6 +21,7 @@ import { paginationSchema } from '@/api/validators/common';
 import type { Tenant } from '@/platform/types';
 import { miniGameService } from '@/mini-app/game-service';
 import { getAdminReferralOverview } from '@/platform/referrals/referral-service';
+import { revokeReward } from '@/platform/referrals/reward-service';
 
 const configSchema = z.object({
   stakePerEntry: z.number().positive().optional(),
@@ -230,5 +231,20 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/referrals/overview', async (_request, reply) => {
     const data = await getAdminReferralOverview();
     reply.send({ data });
+  });
+
+  fastify.post('/referrals/rewards/:id/revoke', { preHandler: requireRole('admin') }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = z.object({ reason: z.string().min(1).max(500) }).parse(request.body ?? { reason: 'admin_revoke' });
+    const ok = await revokeReward({
+      rewardId: id,
+      actorId: request.auth.userId,
+      reason: body.reason,
+    });
+    if (!ok) {
+      reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Reward not found or already revoked' } });
+      return;
+    }
+    reply.send({ data: { revoked: true } });
   });
 }

@@ -7,6 +7,8 @@ import { getLogger } from '../../observability/logger.js';
 import { TenantManager } from '../tenant-manager.js';
 import { createContainerOrchestrator, ContainerOrchestrator } from '../container-orchestrator.js';
 import { SubscriptionStatus } from '../types.js';
+import { tryQualifyReferral } from '../referrals/qualification-service.js';
+import { invalidateReferralForPaymentFailure } from '../referrals/qualification-service.js';
 
 export interface Subscription {
   id: string;
@@ -76,7 +78,44 @@ export class SubscriptionService {
     }
 
     await this.tenants.audit({ actorType: 'billing', action: 'subscription.activated', targetUserId: params.userId, payload: { planId: params.planId } });
+    try {
+      const plan = await this.tenants.getPlan(params.planId);
+      await tryQualifyReferral({
+        referredUserId: params.userId,
+        planId: params.planId,
+        planName: plan?.name ?? null,
+      });
+    } catch (err) {
+      this.logger.warn({ err, userId: params.userId }, 'Referral qualification hook failed');
+    }
     return this.rowToSub(row);
+  }
+
+
+  /** Invalidate referral qualification when a qualifying payment is refunded. */
+  async handlePaymentRefund(userId: string): Promise<void> {
+    await invalidateReferralForPaymentFailure({
+      referredUserId: userId,
+      reason: 'REJECTED_REFUND',
+    });
+    await this.tenants.audit({
+      actorType: 'billing',
+      action: 'subscription.refund_referral_invalidated',
+      targetUserId: userId,
+    });
+  }
+
+  /** Invalidate referral qualification on chargeback. */
+  async handleChargeback(userId: string): Promise<void> {
+    await invalidateReferralForPaymentFailure({
+      referredUserId: userId,
+      reason: 'REJECTED_CHARGEBACK',
+    });
+    await this.tenants.audit({
+      actorType: 'billing',
+      action: 'subscription.chargeback_referral_invalidated',
+      targetUserId: userId,
+    });
   }
 
   async markPastDue(providerSubscriptionId: string): Promise<void> {

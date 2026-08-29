@@ -5,6 +5,7 @@
 import { getPool } from '../persistence/client.js';
 import { getLogger } from '../observability/logger.js';
 import { Tenant, TenantInstance, Plan, QuotaResult, TenantStatus } from './types.js';
+import { tryQualifyReferral } from './referrals/qualification-service.js';
 
 export class TenantManager {
   private readonly logger = getLogger();
@@ -116,6 +117,16 @@ export class TenantManager {
       planId,
       userId,
     ]);
+    try {
+      const plan = await this.getPlan(planId);
+      await tryQualifyReferral({
+        referredUserId: userId,
+        planId,
+        planName: plan?.name ?? null,
+      });
+    } catch {
+      /* referral tables may be absent */
+    }
   }
 
   async getPlan(id: string): Promise<Plan | null> {
