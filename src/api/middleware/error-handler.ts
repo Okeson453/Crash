@@ -38,8 +38,18 @@ export function errorHandler(
     return;
   }
 
-  // Rate limit errors
-  if (error.statusCode === 429) {
+  // Rate limit errors (@fastify/rate-limit and nested shapes)
+  const nested = (error as FastifyError & { error?: { code?: string } }).error;
+  const isRateLimit =
+    error.statusCode === 429 ||
+    error.code === 'RATE_LIMIT' ||
+    error.code === 'FST_ERR_RATE_LIMIT' ||
+    nested?.code === 'RATE_LIMIT';
+  if (isRateLimit) {
+    const retryAfter = (error as FastifyError & { after?: string | number }).after;
+    if (retryAfter !== undefined) {
+      reply.header('Retry-After', String(retryAfter));
+    }
     reply.status(429).send({
       error: {
         code: 'RATE_LIMIT',

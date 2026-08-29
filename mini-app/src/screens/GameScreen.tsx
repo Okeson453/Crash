@@ -18,8 +18,10 @@ import { useGameUIState } from '@/hooks/game/useGameUIState';
 import { useGameStore } from '@/stores/gameStore';
 import { BetPendingState } from '@/components/betting/BetPendingState';
 import { BetErrorDialog } from '@/components/betting/BetErrorDialog';
+import { useTranslation } from 'react-i18next';
 
 export function GameScreen() {
+  const { t } = useTranslation();
   useGameState();
   const ui = useGameUIState();
   const betError = useGameStore((state) => state.betError);
@@ -54,8 +56,8 @@ export function GameScreen() {
       <HistoryStrip />
 
       {/* Active Bet / Cashout */}
-      {ui.state === 'RECONNECTING' && <div role="status" className="rounded-xl bg-crash-yellow/10 px-3 py-2 text-sm text-crash-yellow">Reconnecting… betting is paused.</div>}
-      {ui.state === 'DISCONNECTED' && <div role="alert" className="rounded-xl bg-crash-red/10 px-3 py-2 text-sm text-crash-red">Realtime connection unavailable.</div>}
+      {ui.state === 'RECONNECTING' && <div role="status" className="rounded-xl bg-crash-yellow/10 px-3 py-2 text-sm text-crash-yellow">{t('game.reconnecting')}</div>}
+      {ui.state === 'DISCONNECTED' && <div role="alert" className="rounded-xl bg-crash-red/10 px-3 py-2 text-sm text-crash-red">{t('game.disconnected')}</div>}
       {ui.state === 'BET_PLACED' && <BetPendingState />}
       {showCashout && <CashoutButton />}
       <ActiveBetPanel />

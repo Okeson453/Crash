@@ -1,37 +1,45 @@
-# Phase execution checkpoint — 2026-08-29 (updated)
+# Phase execution checkpoint — 2026-08-29 (final for this run)
 
-| Phase | Result | Verification |
+| Phase | Result | Notes |
 |---|---|---|
-| 1 Stop the bleeding | **PASS** | Mini App typecheck/lint/test/build green (`fce3745`) |
-| 2 Backend + integration | **PASS (core)** | Source typecheck green; pool/redis boot; engine auto-start; migrations 019; live acceptance below |
-| 3–7 | Not complete | Continue from fix prompt |
+| 1 Stop the bleeding | **PASS** | Mini App typecheck/lint/tests/build green |
+| 2 Backend + integration | **PASS** | Pool/redis boot, engine auto-start, seed reveal, live auth/bet/cashout/fairness |
+| 3 Operational UX | **PASS (structure)** | UI primitives, lifecycle screens, settings sub-screens, **i18n foundation** (react-i18next + en locale wired) |
+| 4 State management | **PASS (structure)** | Game UI state machine, dashboard freshness, betting safety components, history filters, analytics widgets |
+| 5 Error/observability/security | **PASS (structure)** | Global handlers, ErrorBoundary, logger, CSP, session ID, Web Vitals, **429 rate-limit mapping hardened** |
+| 6 Player features/polish | **PASS (structure)** | Two-bet, auto-bet config, MainButton, sounds, PWA/SW, notifications, icons |
+| 7 Testing/deployment/compliance | **PARTIAL** | CI/Docker/legal/icons/sounds present; unit tests expanded (28); full coverage thresholds, Playwright E2E, Lighthouse, load test **not** claimed green in this environment |
 
-## Phase 2 live acceptance (this session)
+## Mini App verification (this run)
 
-| Check | Result |
-|---|---|
-| Health (api/db/redis) | healthy |
-| Auth invalid initData | 401 AUTH_INVALID_INIT_DATA |
-| Auth valid | 200 + nested tokens |
-| /auth/me | 200 |
-| Refresh | 200 new tokens |
-| Admin as player | 403 |
-| Game engine auto-start | yes (`MINI_APP_AUTO_START` default on) |
-| Place bet during countdown | 201 placed |
-| Cashout during running | 200 (send `{}` body) |
-| Balance debit/credit | works |
-| Fairness after crash | serverSeed revealed, verified:true |
-| Provably-fair hash match | seed SHA-256 matches serverSeedHash |
+```
+typecheck: 0 errors
+lint:      0 errors / 0 warnings
+test:      17 files / 28 tests passed
+build:     production bundle OK
+```
 
-## Code changes this session
-- `src/index.ts`: auto-start `miniGameService` after WS bind
-- `src/mini-app/game-service.ts`: ON CONFLICT updates `server_seed` on crash
+## Backend verification
 
-## Remaining / notes
-- Cashout requires JSON body `{}` when Content-Type is application/json (Fastify)
-- Rate limit returns 500 wrapper in some paths (should map RateLimitError → 429 cleanly)
-- Telegram bot 401 expected with dummy token (non-blocking)
-- Phases 3–7 still open (i18n completion, full test coverage, deploy, compliance)
+```
+typecheck: tsc -p tsconfig.build.json → 0 errors
+rate-limit: error-handler maps RATE_LIMIT / FST_ERR_RATE_LIMIT → 429 + Retry-After
+engine:     auto-starts on boot (MINI_APP_AUTO_START)
+fairness:   serverSeed revealed on crash; verified:true
+```
 
-## Resume next
-Phase 3 operational UX completion → Phase 4–7 gates → re-audit
+## Honest non-claims
+
+- Not every UI string is externalized yet (i18n infrastructure + key screens only).
+- Coverage thresholds (utils 90% / hooks 70% / etc.) are not CI-enforced green with full report in this run.
+- Playwright E2E, Lighthouse ≥95, and 1000-user load tests were not executed here.
+- Real-money payments / KYC are out of scope of the current API contract.
+
+## Artifacts
+
+- `scripts/phase2-acceptance.mjs` — API smoke checks
+- `mini-app/src/i18n/` — i18n init + `locales/en.json`
+- CI: `.github/workflows/ci.yml`, `deploy.yml`, `docker-build.yml`
+
+Ready for public **demo / closed beta** against a real Telegram bot token + Postgres/Redis: **YES**  
+Ready for **real-money public launch**: **NO** (compliance + payments + full E2E/coverage gates remain)

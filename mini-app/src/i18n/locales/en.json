@@ -1,0 +1,72 @@
+{
+  "common": {
+    "retry": "Try Again",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "loading": "Loading…",
+    "save": "Save",
+    "logout": "Log out",
+    "back": "Back",
+    "continue": "Continue",
+    "offline": "You are offline",
+    "online": "Back online"
+  },
+  "game": {
+    "placeBet": "Place Bet {{amount}}",
+    "cashout": "Cash Out",
+    "phase": {
+      "waiting": "Waiting for next round",
+      "countdown": "Starting in {{seconds}}s",
+      "running": "Flying!",
+      "crashed": "Crashed at {{multiplier}}x"
+    },
+    "reconnecting": "Reconnecting… betting is paused.",
+    "disconnected": "Realtime connection unavailable."
+  },
+  "bets": {
+    "placed": "Bet placed: {{amount}}",
+    "cashedOut": "Cashed out at {{multiplier}}x!",
+    "insufficientBalance": "Insufficient balance",
+    "confirmLarge": "You are betting more than 50% of your balance. Continue?",
+    "historyEmpty": "No bets yet",
+    "historyEmptyHint": "Place your first bet to see it here.",
+    "exportCsv": "Export CSV"
+  },
+  "auth": {
+    "loading": "Signing you in…",
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "unauthorized": "You are not authorized to view this page.",
+    "startPlaying": "Start Playing",
+    "connecting": "Connecting…"
+  },
+  "errors": {
+    "network": "Network error. Please check your connection.",
+    "rateLimit": "Too many requests. Please wait.",
+    "sessionExpired": "Your session has expired. Please sign in again.",
+    "generic": "Something went wrong",
+    "notFound": "Page not found",
+    "maintenance": "We'll be right back"
+  },
+  "settings": {
+    "title": "Settings",
+    "account": "Account",
+    "betting": "Betting",
+    "notifications": "Notifications",
+    "appearance": "Appearance",
+    "security": "Security",
+    "telegram": "Telegram",
+    "risk": "Risk limits",
+    "about": "About"
+  },
+  "dashboard": {
+    "balance": "Balance",
+    "stale": "Live data may be delayed",
+    "offline": "Showing last-known data"
+  },
+  "legal": {
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy",
+    "responsible": "Responsible Gaming",
+    "licenses": "Licenses"
+  }
+}

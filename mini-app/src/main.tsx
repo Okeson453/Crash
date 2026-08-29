@@ -5,6 +5,7 @@ import App from '@/App';
 import { ErrorBoundary } from '@/components/errors/ErrorBoundary';
 import { AppProviders } from '@/providers/AppProviders';
 import '@/index.css';
+import '@/i18n';
 import { setupGlobalErrorHandlers } from '@/lib/error-handler';
 import { initSentry } from '@/lib/sentry';
 import { registerServiceWorker } from '@/lib/registerServiceWorker';
