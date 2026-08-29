@@ -1,0 +1,2 @@
+import { useEffect, useState } from 'react';
+export function useKeyboardState() { const [open, setOpen] = useState(false); useEffect(() => { const viewport = window.visualViewport; if (!viewport) return; const update = () => setOpen(window.innerHeight - viewport.height > 150); viewport.addEventListener('resize', update); return () => viewport.removeEventListener('resize', update); }, []); return open; }

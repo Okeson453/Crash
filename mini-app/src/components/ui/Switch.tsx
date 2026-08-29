@@ -1,0 +1,3 @@
+import { forwardRef } from 'react';
+interface SwitchProps { checked: boolean; onChange: (checked: boolean) => void; label: string; }
+export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch({ checked, onChange, label }, ref) { return <button ref={ref} type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)} className={`relative min-h-11 min-w-12 rounded-full transition-colors ${checked ? 'bg-tg-button' : 'bg-tg-hint/30'}`}><span className={`absolute top-1 left-1 h-9 w-9 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`} /></button>; });

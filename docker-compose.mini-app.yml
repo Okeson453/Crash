@@ -1,0 +1,32 @@
+services:
+  mini-app:
+    build:
+      context: ./mini-app
+      args:
+        VITE_API_BASE_URL: http://localhost:3000
+        VITE_WS_URL: ws://localhost:3000
+    ports: ['8080:80']
+    depends_on: [backend]
+  backend:
+    build: .
+    command: npm run dev:control-plane
+    ports: ['3000:3000']
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/crashwave
+      REDIS_URL: redis://redis:6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
+      REFRESH_SECRET: ${REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+    depends_on: [db, redis]
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crashwave
+    volumes: [pgdata:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+volumes:
+  pgdata:

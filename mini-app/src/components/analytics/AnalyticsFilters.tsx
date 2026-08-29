@@ -1,0 +1,2 @@
+import { Select } from '@/components/ui/Select';
+export function AnalyticsFilters({ period, onChange }: { period: 'day'|'week'|'month'; onChange: (value:'day'|'week'|'month')=>void }) { return <Select aria-label="Analytics period" value={period} onChange={(e)=>{const v=e.target.value;if(v==='day'||v==='week'||v==='month')onChange(v);}}><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></Select>; }

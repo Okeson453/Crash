@@ -1,0 +1,1 @@
+export function MaintenanceScreen() { return <main className="flex min-h-screen items-center justify-center p-6"><div className="max-w-sm text-center"><h1 className="text-xl font-bold text-tg-text">Maintenance in progress</h1><p className="mt-2 text-sm text-tg-hint">CrashWave is temporarily unavailable. Please try again shortly.</p></div></main>; }

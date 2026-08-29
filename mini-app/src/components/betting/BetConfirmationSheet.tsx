@@ -1,0 +1,2 @@
+import { Dialog } from '@/components/ui/Dialog';
+export function BetConfirmationSheet({ open, amount, onConfirm, onCancel }: { open: boolean; amount: number; onConfirm: () => void; onCancel: () => void }) { return <Dialog open={open} title="Confirm large bet" message={`This bet is ${amount.toFixed(2)}. Please confirm before continuing.`} confirmLabel="Place bet" onConfirm={onConfirm} onCancel={onCancel}/>; }

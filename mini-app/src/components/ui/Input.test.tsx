@@ -1,0 +1,1 @@
+import { render, screen } from '@testing-library/react'; import { Input } from './Input'; import { describe, expect, it } from 'vitest'; describe('Input',()=>it('renders',()=>{render(<Input aria-label="Name"/>);expect(screen.getByRole('textbox',{name:'Name'})).toBeInTheDocument();}));

@@ -1,0 +1,2 @@
+export interface Tab { id: string; label: string; }
+export function Tabs({ tabs, value, onChange }: { tabs: Tab[]; value: string; onChange: (value: string) => void }) { return <div role="tablist" className="flex gap-2 overflow-x-auto">{tabs.map((tab) => <button key={tab.id} role="tab" aria-selected={value === tab.id} onClick={() => onChange(tab.id)} className={`min-h-11 shrink-0 rounded-xl px-4 text-sm font-medium ${value === tab.id ? 'bg-tg-button text-tg-button-text' : 'bg-tg-section text-tg-text'}`}>{tab.label}</button>)}</div>; }

@@ -1,0 +1,1 @@
+export function DataFreshnessIndicator({ stale }: { stale: boolean }) { return <span className={`inline-flex items-center gap-2 text-xs ${stale ? 'text-crash-yellow' : 'text-crash-green'}`}><span aria-hidden="true" className="h-2 w-2 rounded-full bg-current" />{stale ? 'Stale data' : 'Fresh data'}</span>; }

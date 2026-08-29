@@ -1,0 +1,1 @@
+import { render } from '@testing-library/react'; import { Skeleton } from './Skeleton'; import { describe, expect, it } from 'vitest'; describe('Skeleton',()=>it('renders',()=>{expect(render(<Skeleton/>).container.firstChild).toBeTruthy();}));

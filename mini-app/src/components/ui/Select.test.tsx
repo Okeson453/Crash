@@ -1,0 +1,1 @@
+import { render, screen } from '@testing-library/react'; import { Select } from './Select'; import { describe, expect, it } from 'vitest'; describe('Select',()=>it('renders',()=>{render(<Select aria-label="Choice"><option>One</option></Select>);expect(screen.getByRole('combobox',{name:'Choice'})).toBeInTheDocument();}));

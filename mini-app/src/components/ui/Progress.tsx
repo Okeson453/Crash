@@ -1,0 +1,1 @@
+export function Progress({ value, label }: { value: number; label?: string }) { const safe = Math.max(0, Math.min(100, value)); return <progress aria-label={label ?? 'Progress'} max={100} value={safe} className="h-2 w-full overflow-hidden rounded-full" />; }

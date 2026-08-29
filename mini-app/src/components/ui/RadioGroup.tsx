@@ -1,0 +1,2 @@
+import type { ReactNode } from 'react';
+export function RadioGroup({ name, value, options, onChange }: { name: string; value: string; options: Array<{ value: string; label: ReactNode }>; onChange: (value: string) => void }) { return <div role="radiogroup" className="space-y-2">{options.map((option) => <label key={option.value} className="flex min-h-11 items-center gap-3 text-sm text-tg-text"><input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />{option.label}</label>)}</div>; }

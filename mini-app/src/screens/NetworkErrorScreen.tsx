@@ -1,0 +1,2 @@
+import { Button } from '@/components/ui/Button';
+export function NetworkErrorScreen() { return <main className="flex min-h-screen items-center justify-center p-6"><div className="max-w-sm text-center"><h1 className="text-xl font-bold text-tg-text">You are offline</h1><p className="mt-2 text-sm text-tg-hint">Reconnect to the internet and retry.</p><Button className="mt-5" onClick={() => window.location.reload()}>Retry</Button></div></main>; }

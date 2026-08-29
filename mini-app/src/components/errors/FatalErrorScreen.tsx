@@ -1,0 +1,2 @@
+import { Button } from '@/components/ui/Button';
+export function FatalErrorScreen() { return <main className="flex min-h-screen items-center justify-center p-6"><div className="text-center"><h1 className="text-xl font-bold text-tg-text">Something went wrong</h1><p className="mt-2 text-sm text-tg-hint">Reload the Mini App to recover.</p><Button className="mt-5" onClick={() => window.location.reload()}>Reload</Button></div></main>; }

@@ -1,0 +1,10 @@
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { getPool } from '@/persistence/client';
+const roundId=z.object({id:z.string().uuid()});
+function rowToRound(row:Record<string,unknown>){return{id:String(row.id),roundNumber:Number(row.round_number),crashPoint:Number(row.crash_point??0),startedAt:row.started_at?new Date(row.started_at as string|number|Date).toISOString():'',crashedAt:row.crashed_at?new Date(row.crashed_at as string|number|Date).toISOString():'',totalBets:0,totalWagered:0,totalPaidOut:0,fairness:{serverSeedHash:String(row.server_seed_hash),serverSeed:row.server_seed?String(row.server_seed):null,clientSeed:String(row.client_seed),nonce:Number(row.nonce),verified:row.server_seed!==null}};}
+export async function roundsRoutes(fastify:FastifyInstance):Promise<void>{
+  fastify.get('/recent',async(request,reply)=>{const limit=Math.min(Math.max(Number(new URLSearchParams(request.url.split('?')[1]??'').get('limit')??20),1),100);const result=await getPool().query('SELECT * FROM mini_app_rounds WHERE phase=\'crashed\' ORDER BY round_number DESC LIMIT $1',[limit]);reply.send({data:result.rows.map(rowToRound)});});
+  fastify.get('/:id',async(request,reply)=>{const params=roundId.parse(request.params);const result=await getPool().query('SELECT * FROM mini_app_rounds WHERE id=$1',[params.id]);if(!result.rows[0]){reply.status(404).send({error:{code:'ROUND_NOT_FOUND',message:'Round not found'}});return;}reply.send({data:rowToRound(result.rows[0])});});
+  fastify.get('/:id/fairness',async(request,reply)=>{const params=roundId.parse(request.params);const result=await getPool().query('SELECT server_seed_hash,server_seed,client_seed,nonce FROM mini_app_rounds WHERE id=$1',[params.id]);if(!result.rows[0]){reply.status(404).send({error:{code:'ROUND_NOT_FOUND',message:'Round not found'}});return;}const row=result.rows[0];reply.send({data:{serverSeedHash:String(row.server_seed_hash),serverSeed:row.server_seed?String(row.server_seed):null,clientSeed:String(row.client_seed),nonce:Number(row.nonce),verified:row.server_seed!==null}});});
+}

@@ -1,0 +1,1 @@
+import { render, screen } from '@testing-library/react'; import { Switch } from './Switch'; import { describe, expect, it } from 'vitest'; describe('Switch',()=>it('renders',()=>{render(<Switch checked={false} onChange={()=>undefined} label="Sound"/>);expect(screen.getByRole('switch',{name:'Sound'})).toBeInTheDocument();}));

@@ -1,0 +1,1 @@
+export function RiskLimitBanner({ message }: { message?: string }) { return message ? <div role="status" className="rounded-xl bg-crash-yellow/10 px-3 py-2 text-xs text-crash-yellow">{message}</div> : null; }
