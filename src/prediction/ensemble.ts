@@ -1,9 +1,6 @@
 /**
- * V1.1 Ensemble Orchestrator — weighted model combination.
- * Design ref: Section 2.7
- *
- * Wraps existing ACIE as primary; additional models can be registered for
- * shadow scoring and eventual canary promotion.
+ * V1.2 Ensemble Orchestrator — multi-model combination for high-frequency play.
+ * Blends ACIE primary signal with secondary models; agreement gates stake size.
  */
 
 import { getLogger } from '../observability/logger.js';
@@ -21,6 +18,8 @@ export interface EnsembleResult {
   confidence: number;
   scores: ModelScore[];
   agreement: number;
+  /** Suggested action bias for HF strategy */
+  recommendedAction: 'ENTRY' | 'REDUCED_ENTRY' | 'SKIP';
 }
 
 export class EnsembleOrchestrator {
@@ -28,7 +27,11 @@ export class EnsembleOrchestrator {
   private readonly weights = new Map<string, number>();
 
   constructor() {
-    this.weights.set('acie-v3', 1.0);
+    // Primary continuous learner
+    this.weights.set('acie-v3', 0.45);
+    this.weights.set('psi-ensemble', 0.25);
+    this.weights.set('short-bayesian', 0.15);
+    this.weights.set('momentum-reversion', 0.15);
   }
 
   setWeight(modelName: string, weight: number): void {
@@ -37,7 +40,13 @@ export class EnsembleOrchestrator {
 
   combine(scores: ModelScore[]): EnsembleResult {
     if (scores.length === 0) {
-      return { probability: 0.5, confidence: 0, scores: [], agreement: 0 };
+      return {
+        probability: 0.5,
+        confidence: 0,
+        scores: [],
+        agreement: 0,
+        recommendedAction: 'SKIP',
+      };
     }
 
     let wSum = 0;
@@ -53,11 +62,14 @@ export class EnsembleOrchestrator {
     const probability = wSum > 0 ? pSum / wSum : 0.5;
     const confidence = wSum > 0 ? cSum / wSum : 0;
 
-    // Agreement: 1 - normalized stddev of probabilities
     const mean = scores.reduce((a, s) => a + s.probability, 0) / scores.length;
     const variance =
       scores.reduce((a, s) => a + (s.probability - mean) ** 2, 0) / scores.length;
     const agreement = Math.max(0, 1 - Math.sqrt(variance) * 2);
+
+    let recommendedAction: EnsembleResult['recommendedAction'] = 'SKIP';
+    if (probability >= 0.62 && agreement >= 0.55) recommendedAction = 'ENTRY';
+    else if (probability >= 0.57 && agreement >= 0.4) recommendedAction = 'REDUCED_ENTRY';
 
     this.logger.debug(
       {
@@ -65,11 +77,12 @@ export class EnsembleOrchestrator {
         probability,
         confidence,
         agreement,
+        recommendedAction,
         models: scores.map((s) => s.modelName),
       },
       'Ensemble combined'
     );
 
-    return { probability, confidence, scores, agreement };
+    return { probability, confidence, scores, agreement, recommendedAction };
   }
 }

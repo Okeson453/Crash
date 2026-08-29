@@ -19,7 +19,7 @@ export const LogLevel = z.enum([
 export const BettingConfigSchema = z.object({
   stakePerEntry: z.number().positive().default(700),
   cashOutTarget: z.number().positive().default(1.30),
-  maxDailyEntries: z.number().int().positive().max(1000).default(100),
+  maxDailyEntries: z.number().int().positive().max(1000).default(500),
   currencyUnit: z.string().min(1).default('units'),
   dayBoundaryTimezone: z.string().min(1).default('UTC'),
 });
@@ -40,7 +40,7 @@ export const RiskConfigSchema = z.object({
 
 export const ObservationConfigSchema = z.object({
   maxTickLatencyMs: z.number().int().positive().default(1000),
-  minConfidenceForEntry: z.enum(['low', 'medium', 'high']).default('high'),
+  minConfidenceForEntry: z.enum(['low', 'medium', 'high']).default('medium'),
   requireRoundId: z.boolean().default(true),
   latencyThresholdHealthyMs: z.number().int().positive().default(500),
   latencyThresholdDegradedMs: z.number().int().positive().default(1000),

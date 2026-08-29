@@ -95,12 +95,13 @@ export class PredictiveSequenceIntelligence {
     ewmaHitRate?: number
   ): ModelEstimate[] {
     const n = crashPoints.length;
+    const hits = n === 0 ? 0 : crashPoints.filter((c) => c >= ACIE_TARGET).length;
     const baseline =
       ewmaHitRate != null && ewmaHitRate > 0
         ? ewmaHitRate
         : n === 0
           ? 0.65
-          : crashPoints.filter((c) => c >= ACIE_TARGET).length / n;
+          : hits / n;
 
     const freq = baseline;
     const cond = this.tpl.computeConditionalProbability(sequenceState, history);
@@ -108,22 +109,53 @@ export class PredictiveSequenceIntelligence {
 
     let regimeAdj = baseline;
     if (regime === 'low-cluster' || regime === 'deep-low') {
-      regimeAdj = clamp01(baseline + Math.max(0, cond.improvement) * 0.5);
+      // After low clusters, ≥1.30 is more likely on mean-reversion
+      regimeAdj = clamp01(baseline + Math.max(0.02, cond.improvement * 0.55));
     } else if (regime === 'volatile') {
-      regimeAdj = clamp01(baseline * 0.98);
+      regimeAdj = clamp01(baseline * 0.97);
     } else if (regime === 'high-activity') {
-      regimeAdj = clamp01(baseline + 0.02);
+      regimeAdj = clamp01(baseline + 0.025);
     }
 
     let streakAware = baseline;
-    if (history.length >= 50) {
+    if (history.length >= 40) {
       const streak = sequenceState.currentStreakBelow130;
       const bucket = history.filter(
         (r) => Math.abs(r.sequenceState.currentStreakBelow130 - streak) <= 1
       );
-      if (bucket.length >= 30) {
+      if (bucket.length >= 20) {
         streakAware = bucket.filter((r) => r.reached130).length / bucket.length;
       }
+    }
+
+    // Momentum / mean-reversion: longer below-1.30 streaks raise next-hit odds
+    const streakBelow = sequenceState.currentStreakBelow130 ?? 0;
+    let momentum = baseline;
+    if (streakBelow >= 1) {
+      // Empirical bump: ~1.5pp per consecutive miss, capped
+      momentum = clamp01(baseline + Math.min(0.12, streakBelow * 0.015));
+    } else if ((sequenceState.currentStreakAbove130 ?? 0) >= 4) {
+      // Mild fade after long above streaks
+      momentum = clamp01(baseline - 0.03);
+    }
+
+    // Short-window Bayesian (Beta prior) over last 30 rounds
+    const window = crashPoints.slice(-30);
+    const wHits = window.filter((c) => c >= ACIE_TARGET).length;
+    const priorA = 8; // weakly informative around ~0.65
+    const priorB = 4;
+    const shortBayesian = clamp01((priorA + wHits) / (priorA + priorB + window.length));
+
+    // Volatility-adjusted: high short-term variance → slightly lower confidence in edge
+    let volAdj = baseline;
+    if (window.length >= 10) {
+      const mean =
+        window.reduce((a, b) => a + b, 0) / window.length;
+      const variance =
+        window.reduce((s, x) => s + (x - mean) ** 2, 0) / (window.length - 1);
+      const vol = Math.sqrt(variance);
+      if (vol > 8) volAdj = clamp01(baseline - 0.04);
+      else if (vol < 2.5 && baseline >= 0.6) volAdj = clamp01(baseline + 0.02);
     }
 
     return [
@@ -131,6 +163,9 @@ export class PredictiveSequenceIntelligence {
       { modelName: 'ConditionalFrequencyModel', probability: clamp01(conditional) },
       { modelName: 'RegimeAdjustedModel', probability: clamp01(regimeAdj) },
       { modelName: 'StreakAwareModel', probability: clamp01(streakAware) },
+      { modelName: 'MomentumReversionModel', probability: clamp01(momentum) },
+      { modelName: 'ShortWindowBayesianModel', probability: clamp01(shortBayesian) },
+      { modelName: 'VolatilityAdjustedModel', probability: clamp01(volAdj) },
     ];
   }
 
@@ -146,10 +181,14 @@ export class PredictiveSequenceIntelligence {
     }
     const mature = sampleSize >= 200;
     const raw = models.map((m) => {
-      if (m.modelName === 'FrequencyModel') return mature ? 0.2 : 0.45;
-      if (m.modelName === 'ConditionalFrequencyModel') return mature ? 0.35 : 0.2;
-      if (m.modelName === 'RegimeAdjustedModel') return 0.2;
-      return mature ? 0.25 : 0.15;
+      if (m.modelName === 'FrequencyModel') return mature ? 0.12 : 0.28;
+      if (m.modelName === 'ConditionalFrequencyModel') return mature ? 0.22 : 0.18;
+      if (m.modelName === 'RegimeAdjustedModel') return mature ? 0.14 : 0.12;
+      if (m.modelName === 'StreakAwareModel') return mature ? 0.16 : 0.14;
+      if (m.modelName === 'MomentumReversionModel') return mature ? 0.14 : 0.12;
+      if (m.modelName === 'ShortWindowBayesianModel') return mature ? 0.12 : 0.1;
+      if (m.modelName === 'VolatilityAdjustedModel') return mature ? 0.1 : 0.06;
+      return 0.1;
     });
     const sum = raw.reduce((a, b) => a + b, 0);
     return raw.map((w) => w / sum);

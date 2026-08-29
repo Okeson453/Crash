@@ -13,7 +13,7 @@ import { TemporalPatternLearner } from './tpl.js';
 import { PredictiveSequenceIntelligence } from './psi.js';
 import { EvidenceEngine } from './evidence.js';
 import { SelfAdaptiveForecastingEngine } from './safe.js';
-import { StrategyLayer, DEFAULT_STRATEGY_POLICY } from './strategy.js';
+import { StrategyLayer, HIGH_FREQUENCY_STRATEGY_POLICY } from './strategy.js';
 import { EntitlementGate } from './entitlement.js';
 import {
   applyOnlineUpdate,
@@ -86,7 +86,7 @@ export class ACIEEngine {
     this.evidenceEngine = new EvidenceEngine();
     this.safe = new SelfAdaptiveForecastingEngine();
     this.strategy = new StrategyLayer({
-      ...DEFAULT_STRATEGY_POLICY,
+      ...HIGH_FREQUENCY_STRATEGY_POLICY,
       ...opts.strategyPolicy,
     });
     this.entitlement = new EntitlementGate();
@@ -326,7 +326,7 @@ export class ACIEEngine {
       currentExposure: riskState?.currentExposure ?? 0,
       consecutiveLosses: riskState?.consecutiveLosses ?? this.consecutiveLosses,
       dailyEntriesUsed: riskState?.dailyEntriesUsed ?? 0,
-      dailyEntriesLimit: riskState?.dailyEntriesLimit ?? 100,
+      dailyEntriesLimit: riskState?.dailyEntriesLimit ?? 500,
       balance: riskState?.balance ?? 0,
     };
 

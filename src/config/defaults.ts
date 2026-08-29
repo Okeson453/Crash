@@ -14,7 +14,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   betting: {
     stakePerEntry: 700,
     cashOutTarget: 1.3,
-    maxDailyEntries: 100,
+    maxDailyEntries: 500,
     currencyUnit: 'units',
     dayBoundaryTimezone: 'UTC',
   },
@@ -30,7 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   observation: {
     maxTickLatencyMs: 1000,
-    minConfidenceForEntry: 'high',
+    minConfidenceForEntry: 'medium',
     requireRoundId: true,
     latencyThresholdHealthyMs: 500,
     latencyThresholdDegradedMs: 1000,
