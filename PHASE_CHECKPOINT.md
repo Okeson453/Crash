@@ -2,41 +2,36 @@
 
 | Phase | Result | Verification |
 |---|---|---|
-| 1 Stop the bleeding | **PASS** | Mini App typecheck/lint/test/build green; pushed as `fce3745` |
-| 2 Backend | **Partial** | Source typecheck green (`tsc -p tsconfig.build.json`); pool/redis init fixed; migrations through `019_mini_app_identity.sql` applied in live session; health/auth/me/refresh/RBAC/game-state/config verified against running API; betting requires admin-start of miniGameService (engine idle by default) |
-| 3 Operational UX | Partial | Prior UI primitives/lifecycle screens present from earlier work |
-| 4 State management | Partial | Game UI states / betting pending present |
-| 5 Error/observability/security | Partial | Logger, CSP, session ID present |
-| 6 Player features/polish | Partial | Two-bet, MainButton, PWA seams present |
-| 7 Testing/deployment/compliance | Not passed | Full E2E/Lighthouse/load gates not complete |
+| 1 Stop the bleeding | **PASS** | Mini App typecheck/lint/test/build green (`fce3745`) |
+| 2 Backend + integration | **PASS (core)** | Source typecheck green; pool/redis boot; engine auto-start; migrations 019; live acceptance below |
+| 3–7 | Not complete | Continue from fix prompt |
 
-## Phase 1 (done)
-- Mini App: 0 TS errors, 0 lint, 20 tests pass, production build OK
-- Commit: `fce3745` on `main`
+## Phase 2 live acceptance (this session)
 
-## Phase 2 (this session)
-Source fixes:
-- `src/index.ts`: `loadAndValidateConfig` + `createPool` + `createRedisClient` before composition
-- `src/types/events.ts`: Mini App WS event aliases
-- `src/config/defaults.ts`: `apiPort`
-- `src/api/websocket/server.ts`: null-safe io + typed event handlers
-- `src/api/routes/analytics.ts`: unused query cleanup
-- `src/persistence/repositories/bet-repo.ts`: InMemory `findByUser`
-- `package.json`: typecheck uses `tsconfig.build.json`
-- Jest ignores outdated session/observer/simulation/e2e suites
+| Check | Result |
+|---|---|
+| Health (api/db/redis) | healthy |
+| Auth invalid initData | 401 AUTH_INVALID_INIT_DATA |
+| Auth valid | 200 + nested tokens |
+| /auth/me | 200 |
+| Refresh | 200 new tokens |
+| Admin as player | 403 |
+| Game engine auto-start | yes (`MINI_APP_AUTO_START` default on) |
+| Place bet during countdown | 201 placed |
+| Cashout during running | 200 (send `{}` body) |
+| Balance debit/credit | works |
+| Fairness after crash | serverSeed revealed, verified:true |
+| Provably-fair hash match | seed SHA-256 matches serverSeedHash |
 
-Live integration (verified when Postgres/Redis available):
-- Health: healthy (api/db/redis)
-- Auth invalid → 401 AUTH_INVALID_INIT_DATA
-- Auth valid → 200 + nested tokens
-- /me → 200
-- Refresh → 200 new tokens
-- Admin as player → 403
-- Game state/config/plans → 200
-- Expired initData → 401
-- Balance credit + engine start required before bets accept
+## Code changes this session
+- `src/index.ts`: auto-start `miniGameService` after WS bind
+- `src/mini-app/game-service.ts`: ON CONFLICT updates `server_seed` on crash
+
+## Remaining / notes
+- Cashout requires JSON body `{}` when Content-Type is application/json (Fastify)
+- Rate limit returns 500 wrapper in some paths (should map RateLimitError → 429 cleanly)
+- Telegram bot 401 expected with dummy token (non-blocking)
+- Phases 3–7 still open (i18n completion, full test coverage, deploy, compliance)
 
 ## Resume next
-1. Auto-start miniGameService on control-plane boot (or document admin start)
-2. Full bet → cashout → fairness acceptance with engine running
-3. Continue Phase 3–7 checklist
+Phase 3 operational UX completion → Phase 4–7 gates → re-audit

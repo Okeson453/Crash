@@ -7,6 +7,7 @@ import { createWebSocketServer } from './api/websocket/server.js';
 import { getLogger } from './observability/logger.js';
 import { createPool } from './persistence/client.js';
 import { createRedisClient } from './persistence/redis-client.js';
+import { miniGameService } from './mini-app/game-service.js';
 
 const config = loadAndValidateConfig();
 const databaseUrl = process.env.DATABASE_URL ?? process.env.APP_PERSISTENCE__CONNECTION_STRING;
@@ -53,6 +54,13 @@ async function main() {
 
   createWebSocketServer(apiServer.server!);
   getLogger().info({}, 'WebSocket server started');
+
+  // Auto-start Mini App crash engine so betting is available without a manual admin call.
+  // Operators can still pause/stop via admin routes.
+  if (process.env.MINI_APP_AUTO_START !== 'false') {
+    miniGameService.start();
+    getLogger().info({ component: 'MiniGameService' }, 'Mini App game engine started');
+  }
 
   const shutdown = async () => {
     getLogger().info({}, 'Shutting down');
