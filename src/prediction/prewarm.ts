@@ -1,27 +1,28 @@
 /**
- * Pre-warm ACIE + incremental feature tracker at session start.
- * Moves O(N) seed work off the first-entry critical path.
+ * Pre-warm ACIE + incremental state + calibration + feature engine.
+ * Blocks live mode until warm (caller enforces).
  */
 
 import { getLogger } from '../observability/logger.js';
 import type { EntryDecisionService } from './entry-decision-service.js';
 import { globalIncrementalFeatures } from './features/incremental-features.js';
+import { globalIncrementalState } from './state/incremental-state-engine.js';
+import { globalCalibrationState } from './calibration/calibration-state.js';
 import { featureHotCache } from '../observability/performance/hot-cache.js';
+import { globalFeatureEngineV2 } from './features/feature-engine-v2.js';
 
 export interface PrewarmResult {
   historyRounds: number;
   featuresSeeded: boolean;
   acieHistorySize: number;
+  stateWarm: boolean;
+  calibrationWarm: boolean;
   durationMs: number;
 }
 
-/**
- * Warm historical buffer, seed ACIE (via ensure path), seed incremental features.
- * Safe to call multiple times; subsequent calls are cheap if already warm.
- */
 export async function prewarmPredictionStack(
   entryDecisionService: EntryDecisionService,
-  historyLimit = 200
+  historyLimit = 500
 ): Promise<PrewarmResult> {
   const logger = getLogger();
   const t0 = performance.now();
@@ -31,24 +32,19 @@ export async function prewarmPredictionStack(
 
   const rounds = hist.getRecentRoundsSync(historyLimit);
   if (rounds.length > 0) {
-    globalIncrementalFeatures.seed(
-      rounds.map((r) => ({
-        ...r,
-        crashPoint: r.crashPoint,
-      }))
-    );
+    globalIncrementalState.seed(rounds.map((r) => r.crashPoint));
+    globalIncrementalFeatures.seed(rounds);
     featureHotCache.set('latest', globalIncrementalFeatures.toFeatures(), 60_000);
+    // Snapshot feature vector once so caches are hot
+    globalFeatureEngineV2.snapshotFromState('prewarm', new Date().toISOString());
   }
 
-  // Force ACIE seed via a no-op observe path: evaluateEntry seed happens on first call;
-  // trigger ensure by reading ACIE history size after a lightweight evaluateNext if possible.
   let acieSize = 0;
   try {
     const acie = entryDecisionService.getACIE();
     acieSize = acie.historySize();
-    // If ACIE still empty but we have rounds, seed explicitly
-    if (acieSize < 20 && rounds.length >= 20 && typeof (acie as any).seedHistory === 'function') {
-      (acie as any).seedHistory(
+    if (acieSize < 20 && rounds.length >= 20) {
+      acie.seedHistory(
         rounds.map((r) => ({
           roundId: r.id || r.externalRoundId || `prewarm-${r.crashPoint}`,
           crashPoint: r.crashPoint,
@@ -65,21 +61,22 @@ export async function prewarmPredictionStack(
   }
 
   const durationMs = performance.now() - t0;
-  logger.info(
-    {
-      component: 'Prewarm',
-      historyRounds: rounds.length,
-      featuresSeeded: rounds.length > 0,
-      acieHistorySize: acieSize,
-      durationMs: Math.round(durationMs),
-    },
-    'Prediction stack pre-warmed'
-  );
-
-  return {
+  const result: PrewarmResult = {
     historyRounds: rounds.length,
     featuresSeeded: rounds.length > 0,
     acieHistorySize: acieSize,
+    stateWarm: globalIncrementalState.isWarm(Math.min(50, Math.floor(historyLimit / 4))),
+    calibrationWarm: globalCalibrationState.isWarm(),
     durationMs,
   };
+  logger.info({ component: 'Prewarm', ...result }, 'Prediction stack pre-warmed');
+  return result;
+}
+
+export function assertPredictionWarmForLive(minHistory = 50): void {
+  if (!globalIncrementalState.isWarm(minHistory)) {
+    throw new Error(
+      `LIVE MODE BLOCKED: incremental state cold (count=${globalIncrementalState.snapshot().count}, need≥${minHistory})`
+    );
+  }
 }

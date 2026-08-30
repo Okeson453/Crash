@@ -17,3 +17,12 @@ export type { EntryDecisionContext, EntryDecisionResult } from './entry-decision
 
 // ACIE v3 — 1.30× threshold-probability intelligence
 export * from './acie/index.js';
+
+// Phase 1–4 upgrades
+export { IncrementalStateEngine, globalIncrementalState } from './state/incremental-state-engine.js';
+export { FeatureEngineV2, globalFeatureEngineV2 } from './features/feature-engine-v2.js';
+export { FEATURE_VERSION_V2 } from './features/feature-meta.js';
+export { CalibrationState, globalCalibrationState } from './calibration/calibration-state.js';
+export { EnsembleOrchestrator, globalEnsemble, DEFAULT_ENSEMBLE_FLAGS } from './ensemble/ensemble-orchestrator.js';
+export { prewarmPredictionStack, assertPredictionWarmForLive } from './prewarm.js';
+export { globalIncrementalFeatures } from './features/incremental-features.js';

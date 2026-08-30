@@ -27,6 +27,7 @@ import {
   globalEntryLatencyWindow,
 } from '../observability/performance/latency.js';
 import { predictionHotCache } from '../observability/performance/hot-cache.js';
+import { globalCalibrationState } from './calibration/calibration-state.js';
 import { globalIncrementalFeatures } from './features/incremental-features.js';
 import { PredictionStateRegistry, type PredictionStateSnapshot } from './state-snapshot.js';
 
@@ -61,6 +62,7 @@ export class EntryDecisionService {
   private acieSeeded = false;
   private readonly stateRegistry: PredictionStateRegistry;
   private lastStateSnapshot: PredictionStateSnapshot;
+  private lastEmittedProbability: number | null = null;
 
   constructor(opts?: {
     predictionEngine?: PredictionEngine;
@@ -112,6 +114,16 @@ export class EntryDecisionService {
     this.ensureAcieSeeded();
     // O(1) incremental feature update (feeds hot feature cache)
     globalIncrementalFeatures.onCrash(crashPoint);
+    // Phase 4: feed last emitted probability into calibration (if present on snapshot)
+    try {
+      if (this.lastEmittedProbability != null && this.lastEmittedProbability > 0) {
+        globalCalibrationState.observe(
+          this.lastEmittedProbability,
+          crashPoint >= 1.3 ? 1 : 0,
+          'global'
+        );
+      }
+    } catch { /* non-critical */ }
     const result = this.acie.onCrash(
       {
         roundId,
@@ -198,14 +210,20 @@ export class EntryDecisionService {
         const p = acieEval.psi.estimatedProbability;
         const conf = Math.max(0, Math.min(1, 1 - acieEval.psi.modelUncertainty));
         const expires = new Date(new Date(ctx.decisionTimestamp).getTime() + 45_000).toISOString();
+        const calibrated = globalCalibrationState.calibrateWithShrinkage(
+          p,
+          String(acieEval.regime ?? 'global'),
+          p,
+          this.acie.historySize()
+        );
         signal = {
           predictionId: randomUUID(),
           timestamp: ctx.decisionTimestamp,
           modelVersion: stateSnapshot.modelVersion,
           featureVersion: stateSnapshot.featureVersion,
           target,
-          score: p,
-          probability: p,
+          score: calibrated,
+          probability: calibrated,
           confidence: conf,
           regimeId: acieEval.regime,
           dataQuality: Math.min(1, this.acie.historySize() / 200),
@@ -260,6 +278,7 @@ export class EntryDecisionService {
         signal = null;
       } else if (signal) {
         this.lastSignal = signal;
+        this.lastEmittedProbability = signal.probability;
       }
     } else {
       this.logger.info(
