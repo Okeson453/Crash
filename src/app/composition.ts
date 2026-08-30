@@ -64,7 +64,9 @@ import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
 import { SettlementReconciler } from '../background-workers/settlement-reconciler';
 import { setPrewarmResult, isReadyForLive } from '../observability/readiness';
-import { loadPredictionStackOnBoot, saveSnapshotToFile } from '../prediction/state/state-persistence';
+import { loadPredictionStackOnBoot, saveSnapshotToFile, saveSnapshotToRedis } from '../prediction/state/state-persistence';
+import { loadApprovedEnsembleFlags } from '../prediction/ensemble/promotion-evidence';
+import { globalEnsemble } from '../prediction/ensemble/ensemble-orchestrator';
 import { TenantManager, TenantResolver, TenantRuntimeFactory } from '../platform';
 import { wireDryRunSignalBridge, onRoundCrashedForDryRun } from './dry-run-bridge';
 import { checkEntryLatencySlo } from '../observability/performance/entry-slo-guard';
@@ -383,12 +385,23 @@ export function composeApplication(
 
     try {
       try {
-        await loadPredictionStackOnBoot(null, entryDecisionService.getACIE());
+        let redis: { get(k: string): Promise<string | null>; set(k: string, v: string, ...a: unknown[]): Promise<unknown> } | null = null;
+        try {
+          redis = getRedisClient() as never;
+        } catch { /* redis optional at boot */ }
+        await loadPredictionStackOnBoot(redis, entryDecisionService.getACIE());
       } catch { /* snapshot optional */ }
       const warm = await prewarmPredictionStack(entryDecisionService, 500);
       setPrewarmResult(warm);
       try {
+        const flags = await loadApprovedEnsembleFlags();
+        globalEnsemble.setFlags(flags);
+      } catch { /* */ }
+      try {
         await saveSnapshotToFile(undefined, entryDecisionService.getACIE());
+        try {
+          await saveSnapshotToRedis(getRedisClient() as never, entryDecisionService.getACIE());
+        } catch { /* redis optional */ }
       } catch { /* */ }
       logger.info(
         {

@@ -28,6 +28,8 @@ import { globalCalibrationState } from './calibration/calibration-state.js';
 import { RoundRepository } from '../persistence/repositories/round-repo.js';
 import { ACIEEngine } from './acie/engine.js';
 import { globalLiveDivergence } from './validation/live-divergence-monitor.js';
+import { isReadyForLive } from '../observability/readiness.js';
+import { saveSnapshotToFile } from './state/state-persistence.js';
 import { onlineMeanCalibrationError } from './acie/online-state.js';
 import type { CrashLearningResult } from './acie/engine.js';
 import type { StrategyRiskState } from './acie/types.js';
@@ -84,6 +86,7 @@ export class EntryDecisionService {
   private readonly stateRegistry: PredictionStateRegistry;
   private lastStateSnapshot: PredictionStateSnapshot;
   private lastEmittedProbability: number | null = null;
+  private crashCountForSnapshot = 0;
   private sheathMode: SheathMode | null = null;
   private usePipeline = true;
   private provenanceRepo: PredictionProvenanceRepository | InMemoryPredictionProvenanceRepository;
@@ -169,11 +172,33 @@ export class EntryDecisionService {
             { component: 'EntryDecisionService', level: div.level, reason: div.reason },
             'Live divergence full sheath — halt entries'
           );
-          // sheath is coordinated via composition RoundCrashed; also set learning state
+          try {
+            this.sheathMode?.reportTriggers([
+              {
+                id: 'prediction_divergence',
+                severity: 'critical',
+                message: div.reason ?? `divergence level ${div.level}`,
+                detectedAt: new Date().toISOString(),
+                metadata: { level: div.level },
+              },
+            ]);
+          } catch { /* */ }
           this.publishLearningState({
             divergenceLevel: div.level,
             divergenceReason: div.reason ?? undefined,
           } as never);
+        } else if (div.actions.lockConservativeBaseline) {
+          try {
+            this.sheathMode?.reportTriggers([
+              {
+                id: 'prediction_calibration_degraded',
+                severity: 'high',
+                message: div.reason ?? 'conservative baseline lock',
+                detectedAt: new Date().toISOString(),
+                metadata: { level: div.level },
+              },
+            ]);
+          } catch { /* */ }
         }
 
       }
@@ -186,6 +211,10 @@ export class EntryDecisionService {
         coldState: !globalIncrementalState.isWarm(30),
       });
     } catch { /* non-critical */ }
+    this.crashCountForSnapshot += 1;
+    if (this.crashCountForSnapshot % 25 === 0) {
+      void saveSnapshotToFile(undefined, this.acie).catch(() => undefined);
+    }
     const result = this.acie.onCrash(
       {
         roundId,
@@ -209,6 +238,17 @@ export class EntryDecisionService {
   }
 
   async evaluateEntry(ctx: EntryDecisionContext): Promise<EntryDecisionResult> {
+    if (ctx.riskInput?.mode === 'live' && !isReadyForLive()) {
+      this.logger.warn({ component: 'EntryDecisionService' }, 'Live entry blocked — prediction not ready');
+      const riskResult = this.riskEngine.evaluate(ctx.riskInput);
+      return {
+        signal: null,
+        riskResult: { ...riskResult, approved: false, rejectionReason: 'PREDICTION_NOT_READY', firstFailure: 'prediction_not_ready' },
+        predictionPersisted: false,
+        acie: null,
+      };
+    }
+
     const timer = new LatencyTimer();
     const target = ctx.target ?? 1.3;
     const historyLimit = ctx.historyLimit ?? 100;
@@ -352,6 +392,7 @@ export class EntryDecisionService {
         // Honest prediction quality labels (P1)
         (signal as Record<string, unknown>).modelFamily = 'acie-heuristic-ensemble';
         (signal as Record<string, unknown>).heuristic = true;
+        (signal as Record<string, unknown>).modelScope = 'global';
         (signal as Record<string, unknown>).modelVersion = 'acie-v3';
         try {
           (signal as Record<string, unknown>).calibrationError = onlineMeanCalibrationError(

@@ -41,14 +41,11 @@ export async function startMiniGameEventRelay(
         };
         onEvent?.(parsed.name, parsed.payload);
         // Best-effort WS fanout if helpers exist
-        try {
-          // dynamic to avoid hard dep cycle
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const ws = require('../api/websocket/server.js') as {
-            broadcastGameEvent?: (name: string, payload: Record<string, unknown>) => void;
-          };
-          ws.broadcastGameEvent?.(parsed.name, parsed.payload);
-        } catch { /* */ }
+        void import('../api/websocket/server.js')
+          .then((ws) => {
+            ws.broadcastGameEvent?.(parsed.name, parsed.payload);
+          })
+          .catch(() => undefined);
       } catch { /* */ }
     });
     logger.info({ component: 'GameEventRelay', channel: CHANNEL }, 'Subscribed to mini-game events');
