@@ -129,7 +129,17 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
     markovP: globalIncrementalState.markovPNextAbove13(),
   };
   const metaProbability = globalMetaModel.predict(metaFeatures);
-  const blended = 0.5 * ensemble.probability + 0.5 * metaProbability;
+  let metaWeight = 0.5;
+  try {
+    const metaLife = globalModelLifecycle.get('meta', 'lr-v1');
+    if (!metaLife || metaLife.stage === 'SHADOW' || metaLife.stage === 'DEPRECATION') {
+      metaWeight = 0.15;
+    } else if (metaLife.stage === 'CANARY') {
+      metaWeight = Math.min(0.5, 0.15 + (metaLife.trafficShare ?? 0.1) * 0.5);
+    }
+  } catch { /* */ }
+  const blended =
+    (1 - metaWeight) * ensemble.probability + metaWeight * metaProbability;
 
   // Calibration
   const calibratedProbability = globalCalibrationState.calibrateWithShrinkage(
@@ -212,14 +222,6 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
   }
 
   // Opportunity rank
-  // Shadow meta model (lifecycle SHADOW) — score but never authorize alone
-  try {
-    const metaShadow = globalModelLifecycle.get('meta', 'lr-v1');
-    if (metaShadow && metaShadow.stage === 'SHADOW') {
-      // meta probability already in blend; shadow is observational
-    }
-  } catch { /* */ }
-
   const opportunity = globalOpportunityRanker.scoreAndInsert({
     predictionId,
     target: selected.target,

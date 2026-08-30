@@ -198,5 +198,5 @@ export class InMemoryPredictionProvenanceRepository {
     this.drifts.push(input);
   }
   async upsertModelVersion(): Promise<void> {}
-  async enrichPrediction(): Promise<void> {}
+  async enrichPrediction(_input?: unknown): Promise<void> {}
 }

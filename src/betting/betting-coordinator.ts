@@ -71,6 +71,7 @@ export class BettingCoordinator {
   private readonly config: AppConfig;
   private sessionId: string | null;
   private lastPredictionId: string | null = null;
+  private lastCashOutTarget = 1.3;
   private evaluating = false;
   private readonly onEntryConfirmed?: () => void;
   private readonly dailyLedger: DailyEntryLedger | null;
@@ -175,6 +176,13 @@ export class BettingCoordinator {
       });
 
       this.lastPredictionId = decision.signal?.predictionId ?? null;
+      // Pipeline multi-target drives cash-out when present
+      if (decision.signal?.target && Number.isFinite(decision.signal.target)) {
+        this.lastCashOutTarget = decision.signal.target;
+      } else {
+        this.lastCashOutTarget =
+          (this.config as { betting?: { cashOutTarget?: number } }).betting?.cashOutTarget ?? 1.3;
+      }
 
       // V1.1 Decision Engine — opportunity ranking gate (quality over volume)
       if (this.decisionEngine && decision.signal) {
@@ -310,8 +318,7 @@ export class BettingCoordinator {
       }
 
       if (this.lastPredictionId) {
-        const target =
-          (this.config as { betting?: { cashOutTarget?: number } }).betting?.cashOutTarget ?? 1.3;
+        const target = this.lastCashOutTarget;
         // Non-blocking outcome persistence
         this.entryDecisionService.resolveActualOutcomeAsync({
           predictionId: this.lastPredictionId,
@@ -369,8 +376,8 @@ export class BettingCoordinator {
     const betId = randomUUID();
     const stake =
       (this.config as { betting?: { stakePerEntry?: number } }).betting?.stakePerEntry ?? 700;
-    const target =
-      (this.config as { betting?: { cashOutTarget?: number } }).betting?.cashOutTarget ?? 1.3;
+    // Prefer pipeline-selected multi-target over static config
+    const target = this.lastCashOutTarget;
     const sessionId = this.sessionId ?? 'unknown';
     const tz =
       (this.config.betting as { dayBoundaryTimezone?: string } | undefined)?.dayBoundaryTimezone ??

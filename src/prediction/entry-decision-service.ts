@@ -17,6 +17,14 @@ import {
   PredictionRepository,
   InMemoryPredictionRepository,
 } from '../persistence/repositories/prediction-repo.js';
+import {
+  PredictionProvenanceRepository,
+  InMemoryPredictionProvenanceRepository,
+} from '../persistence/repositories/prediction-provenance-repo.js';
+import type { OpportunityRanker as DecisionOpportunityRanker } from '../opportunity/ranker.js';
+import { bridgeOpportunityToDecisionRanker } from '../opportunity/prediction-bridge.js';
+import { globalCalibrationState } from './calibration/calibration-state.js';
+
 import { RoundRepository } from '../persistence/repositories/round-repo.js';
 import { ACIEEngine } from './acie/engine.js';
 import type { CrashLearningResult } from './acie/engine.js';
@@ -27,7 +35,6 @@ import {
   globalEntryLatencyWindow,
 } from '../observability/performance/latency.js';
 import { predictionHotCache } from '../observability/performance/hot-cache.js';
-import { globalCalibrationState } from './calibration/calibration-state.js';
 import { globalIncrementalFeatures } from './features/incremental-features.js';
 import { globalIncrementalState } from './state/incremental-state-engine.js';
 import {
@@ -75,6 +82,8 @@ export class EntryDecisionService {
   private lastEmittedProbability: number | null = null;
   private sheathMode: SheathMode | null = null;
   private usePipeline = true;
+  private provenanceRepo: PredictionProvenanceRepository | InMemoryPredictionProvenanceRepository;
+  private decisionRanker: DecisionOpportunityRanker | null = null;
 
   constructor(opts?: {
     predictionEngine?: PredictionEngine;
@@ -86,6 +95,8 @@ export class EntryDecisionService {
     preferAcie?: boolean;
     sheathMode?: SheathMode | null;
     usePipeline?: boolean;
+    provenanceRepo?: PredictionProvenanceRepository | InMemoryPredictionProvenanceRepository;
+    decisionRanker?: DecisionOpportunityRanker | null;
   }) {
     this.predictionEngine = opts?.predictionEngine ?? new PredictionEngine();
     this.historicalData =
@@ -97,12 +108,24 @@ export class EntryDecisionService {
     this.preferAcie = opts?.preferAcie ?? true;
     this.sheathMode = opts?.sheathMode ?? null;
     this.usePipeline = opts?.usePipeline ?? true;
+    this.provenanceRepo = opts?.provenanceRepo ?? new InMemoryPredictionProvenanceRepository();
+    this.decisionRanker = opts?.decisionRanker ?? null;
     this.stateRegistry = new PredictionStateRegistry();
     this.lastStateSnapshot = this.stateRegistry.snapshot();
   }
 
   getHistoricalDataService(): HistoricalDataService {
     return this.historicalData;
+  }
+
+  setDecisionRanker(ranker: DecisionOpportunityRanker | null): void {
+    this.decisionRanker = ranker;
+  }
+
+  setProvenanceRepo(
+    repo: PredictionProvenanceRepository | InMemoryPredictionProvenanceRepository
+  ): void {
+    this.provenanceRepo = repo;
   }
 
   getACIE(): ACIEEngine {
@@ -471,9 +494,17 @@ export class EntryDecisionService {
       `oppScore=${pipeline.opportunity.score.toFixed(4)}`,
     ]);
 
-    // Pipeline SKIP / sheath → zero opportunity for risk layer
     const probability = pipeline.calibratedProbability;
     const confidence = pipeline.opportunity.confidence;
+
+    // Unify prediction opportunity with decision-layer ranker
+    try {
+      if (this.decisionRanker) {
+        bridgeOpportunityToDecisionRanker(this.decisionRanker, pipeline.opportunity);
+      }
+    } catch {
+      /* non-critical */
+    }
 
     return {
       predictionId: pipeline.predictionId || signal.predictionId,
@@ -515,7 +546,7 @@ export class EntryDecisionService {
           sessionId: ctx.sessionId,
           roundId: ctx.roundId,
           externalRoundId: ctx.externalRoundId,
-          regimeName: null,
+          regimeName: signal.regimeId,
         });
         await this.predictionRepo.resolveOutcome({
           predictionId: signal.predictionId,
@@ -525,6 +556,54 @@ export class EntryDecisionService {
           betExecuted: false,
           targetThreshold: target,
         });
+
+        // Full provenance (migration 025) — best-effort
+        const fs = signal.featureSummary as Record<string, number>;
+        const raw = Number(fs.rawPipelineProbability ?? signal.probability);
+        const meta = Number(fs.metaProbability ?? signal.probability);
+        const opp = Number(fs.opportunityScore ?? 0);
+        try {
+          await this.provenanceRepo.enrichPrediction({
+            predictionId: signal.predictionId,
+            calibratedProbability: signal.probability,
+            rawProbability: raw,
+            opportunityScore: opp,
+            metaProbability: meta,
+            calibrationVersion: globalCalibrationState.version,
+          });
+          await this.provenanceRepo.recordCalibration({
+            predictionId: signal.predictionId,
+            rawProbability: raw,
+            calibratedProbability: signal.probability,
+            calibrationVersion: globalCalibrationState.version,
+            regime: signal.regimeId ?? undefined,
+          });
+          await this.provenanceRepo.recordOpportunity({
+            opportunityId: `opp-${signal.predictionId}`,
+            predictionId: signal.predictionId,
+            target: signal.target,
+            score: opp,
+            rank: Number(fs.opportunityRank ?? 0) || undefined,
+            calibratedProbability: signal.probability,
+            regime: signal.regimeId ?? undefined,
+          });
+          await this.provenanceRepo.recordModelScores(signal.predictionId, [
+            {
+              modelName: 'pipeline',
+              modelVersion: signal.modelVersion,
+              probability: signal.probability,
+              weight: 1,
+            },
+            {
+              modelName: 'meta',
+              modelVersion: 'lr-v1',
+              probability: meta,
+              weight: 0.5,
+            },
+          ]);
+        } catch {
+          /* provenance tables may not exist yet */
+        }
       } catch (err) {
         this.logger.error(
           {

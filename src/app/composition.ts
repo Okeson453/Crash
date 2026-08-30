@@ -31,6 +31,7 @@ import { NotificationRouter } from '../notifications/notification-router';
 import { DailyReportScheduler } from '../notifications/daily-report-scheduler';
 import { HealthMonitor } from '../observability/health/monitor';
 import { EntryDecisionService } from '../prediction/entry-decision-service';
+import { PredictionProvenanceRepository } from '../persistence/repositories/prediction-provenance-repo';
 import { PredictionEngine } from '../prediction/prediction-engine';
 import { HistoricalDataService } from '../prediction/historical-data-service';
 import { PredictionRepository } from '../persistence/repositories/prediction-repo';
@@ -268,6 +269,10 @@ export function composeApplication(
   });
 
   const opportunityRanker = new OpportunityRanker();
+  entryDecisionService.setDecisionRanker(opportunityRanker);
+  try {
+    entryDecisionService.setProvenanceRepo(new PredictionProvenanceRepository(pool));
+  } catch { /* pool may be unavailable in some modes */ }
   const decisionEngine = new DecisionEngine({ ranker: opportunityRanker, sheathMode, baseEnterThreshold: 0.42 });
   const featureStore = new FeatureStore();
   const ensemble = new EnsembleOrchestrator();

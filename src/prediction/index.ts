@@ -59,3 +59,6 @@ export {
   PredictionProvenanceRepository,
   InMemoryPredictionProvenanceRepository,
 } from '../persistence/repositories/prediction-provenance-repo.js';
+export { runRegimeFitJob, featureRowsFromCrashPoints } from './regimes/regime-fit-job.js';
+export { computeGroupImportance, DEFAULT_FEATURE_GROUPS } from './features/feature-importance.js';
+export { fitRegimesOffline } from './workers/regime-fit-offload.js';

@@ -92,14 +92,14 @@ export async function prewarmPredictionStack(
   // §4 randomness gate — only enable sequence models if structure replicates
   try {
     if (rounds.length >= 1000) {
-      const gate = runRandomnessGate(
-        rounds.map((r) => r.crashPoint),
-        { minRounds: Math.min(50_000, Math.max(1000, rounds.length)) }
-      );
+      // Strict gate: sequence models only when ≥50k rounds AND structure replicates
+      const gate = runRandomnessGate(rounds.map((r) => r.crashPoint), {
+        minRounds: 50_000,
+      });
       const flags = applyRandomnessGateToFlags(
-        rounds.length >= 50_000
+        rounds.length >= 50_000 && gate.allowSequenceModels
           ? gate
-          : { ...gate, allowSequenceModels: false }
+          : { ...gate, allowSequenceModels: false, summary: gate.summary + ' (strict-50k)' }
       );
       globalEnsemble.setFlags(flags);
       // Lookahead stays off unless full 50k gate allows sequence models
