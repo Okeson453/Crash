@@ -57,6 +57,8 @@ CMD ["node", "dist/index.js"]
 
 # Slim API / control-plane image without Playwright browsers
 FROM node:20-bookworm-slim AS api-production
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \

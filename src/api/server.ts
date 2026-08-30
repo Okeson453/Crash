@@ -26,7 +26,9 @@ import { refreshPoolMetrics } from '../persistence/pool-metrics';
 export async function createApiServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
     logger: true,
-    genReqId: () => `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    genReqId: (req) =>
+      (typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id']) ||
+      `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   });
 
   // Error handler
@@ -147,7 +149,9 @@ export async function createApiServer(): Promise<FastifyInstance> {
         },
       },
     });
-    await fastify.register(swaggerUi as never, { routePrefix: '/api/docs' });
+    if (process.env.NODE_ENV !== 'production' || process.env.SWAGGER_OPEN === 'true') {
+      await fastify.register(swaggerUi as never, { routePrefix: '/api/docs' });
+    }
   } catch {
     // optional packages not installed
   }
@@ -172,7 +176,21 @@ export async function createApiServer(): Promise<FastifyInstance> {
   await fastify.register(responsibleGamblingRoutes, { prefix: '/api/v1/rg' });
 
   // Prometheus metrics (Phase 5.8)
-  fastify.get('/metrics', async (_request, reply) => {
+  fastify.get('/metrics', {
+    preHandler: async (request, reply) => {
+      const token = process.env.METRICS_TOKEN?.trim();
+      if (!token) return; // open when unset (Prometheus default)
+      const auth = request.headers.authorization || '';
+      const hdr = request.headers['x-metrics-token'];
+      const ok =
+        auth === `Bearer ${token}` ||
+        hdr === token;
+      if (!ok) {
+        reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Metrics token required' } });
+        return;
+      }
+    },
+  }, async (_request, reply) => {
     refreshPoolMetrics();
     reply.header('Content-Type', metricsRegistry.contentType);
     reply.send(await metricsRegistry.metrics());

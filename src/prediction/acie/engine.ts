@@ -56,7 +56,7 @@ export interface CrashLearningResult {
   /** Decision for the *next* round */
   evaluation: ACIEEvaluationResult;
   /** True when heavy batch validation ran this tick */
-  heavyValidationRan: boolean;
+  heavyValidationRan /* intentionally false on hot tick; heavy runs async */: boolean;
   evidence: EvidenceReport;
 }
 

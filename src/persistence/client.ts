@@ -128,3 +128,23 @@ export async function healthCheck(): Promise<boolean> {
     return false;
   }
 }
+
+
+/** Close and clear singleton — allows re-init with different config (tests / multi-tenant workers) */
+export async function resetPool(): Promise<void> {
+  if (pool) {
+    await pool.end().catch(() => undefined);
+    pool = null;
+  }
+}
+
+/** Create a non-singleton pool for isolated tenants / workers */
+export function createIsolatedPool(config: DatabaseConfig): Pool {
+  return new Pool({
+    connectionString: config.connectionString,
+    max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? 10),
+    idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
+    connectionTimeoutMillis:
+      config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
+  });
+}

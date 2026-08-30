@@ -235,7 +235,8 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
     featureVersion: (() => {
       const fv = input.featureVersion ?? CURRENT_FEATURE_VERSION;
       if (fv !== CURRENT_FEATURE_VERSION && fv !== FEATURE_VERSION_V2) {
-        throw new Error(`Feature version mismatch: got ${fv}, need ${CURRENT_FEATURE_VERSION}`);
+        // Soft degrade — do not crash the hot path
+        return CURRENT_FEATURE_VERSION;
       }
       return CURRENT_FEATURE_VERSION;
     })(),

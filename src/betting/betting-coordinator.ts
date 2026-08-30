@@ -77,6 +77,8 @@ export class BettingCoordinator {
   private lastPredictionId: string | null = null;
   private lastCashOutTarget = 1.3;
   private evaluating = false;
+  private evaluatingChain: Promise<void> = Promise.resolve();
+  private lastCashOutTargetByRound = new Map<string, number>();
   private readonly onEntryConfirmed?: () => void;
   private readonly dailyLedger: DailyEntryLedger | null;
   private readonly sheathMode: SheathMode | null;
@@ -129,6 +131,15 @@ export class BettingCoordinator {
    * Called when a new round starts and entry may be considered.
    */
   async onRoundStarted(roundId: string, roundState: RoundState): Promise<void> {
+    // Serialize concurrent round-start triggers (WS + DOM)
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const prev = this.evaluatingChain;
+    this.evaluatingChain = prev.then(() => gate);
+    await prev;
+    try {
     if (this.evaluating) {
       this.logger.warn({ component: 'BettingCoordinator', roundId }, 'Entry evaluation already in progress');
       return;
@@ -183,6 +194,7 @@ export class BettingCoordinator {
       // Pipeline multi-target drives cash-out when present
       if (decision.signal?.target && Number.isFinite(decision.signal.target)) {
         this.lastCashOutTarget = decision.signal.target;
+        this.lastCashOutTargetByRound.set(roundId, decision.signal.target);
       } else {
         this.lastCashOutTarget =
           (this.config as { betting?: { cashOutTarget?: number } }).betting?.cashOutTarget ?? 1.3;
@@ -284,6 +296,9 @@ export class BettingCoordinator {
     } finally {
       this.evaluating = false;
     }
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -322,7 +337,9 @@ export class BettingCoordinator {
       }
 
       if (this.lastPredictionId) {
-        const target = this.lastCashOutTarget;
+        const target =
+          this.lastCashOutTargetByRound.get(roundId) ?? this.lastCashOutTarget;
+        this.lastCashOutTargetByRound.delete(roundId);
         // Non-blocking outcome persistence
         this.entryDecisionService.resolveActualOutcomeAsync({
           predictionId: this.lastPredictionId,
@@ -396,7 +413,9 @@ export class BettingCoordinator {
     const stake =
       (this.config as { betting?: { stakePerEntry?: number } }).betting?.stakePerEntry ?? 700;
     // Prefer pipeline-selected multi-target over static config
-    const target = this.lastCashOutTarget;
+    const target =
+          this.lastCashOutTargetByRound.get(roundId) ?? this.lastCashOutTarget;
+        this.lastCashOutTargetByRound.delete(roundId);
     const sessionId = this.sessionId ?? 'unknown';
     const tz =
       (this.config.betting as { dayBoundaryTimezone?: string } | undefined)?.dayBoundaryTimezone ??
@@ -430,7 +449,13 @@ export class BettingCoordinator {
     this.machine.send({ type: 'BET_SUBMITTED', betId });
 
     try {
-      const result = await this.liveBetExecutor.placeLiveBet({
+      const result = // TOCTOU: re-check prediction signal expiry immediately before placement
+        if (decision?.signal?.expiresAt && new Date(decision.signal.expiresAt).getTime() < Date.now()) {
+          this.logger.warn({ component: 'BettingCoordinator', roundId }, 'Signal expired before placement');
+          this.machine.send({ type: 'RISK_REJECTED', reason: 'SIGNAL_EXPIRED' });
+          return;
+        }
+        await this.liveBetExecutor.placeLiveBet({
         betId,
         roundId,
         sessionId,

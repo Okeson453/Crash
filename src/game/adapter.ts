@@ -36,6 +36,7 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
   private readonly options: Required<GameAdapterOptions>;
   private readonly logger = getLogger();
   private started = false;
+  private domMissStreak = 0;
   private currentState: RoundState;
   private gameListeners: GameAdapterListener[] = [];
   private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -72,6 +73,7 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
       lastTickAt: null,
       source: 'unknown',
       confidence: 'low',
+      // tracked via domMissStreak
     };
   }
 
@@ -92,6 +94,25 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
     // Set up WebSocket interception if enabled
     if (this.options.enableWsAdapter) {
       await this.setupWsInterception();
+      // Playwright native WebSocket frames (primary)
+      try {
+        this.options.page.on('websocket', (ws) => {
+          ws.on('framereceived', (ev) => {
+            try {
+              const text = typeof ev.payload === 'string' ? ev.payload : '';
+              if (!text) return;
+              let data: unknown;
+              try { data = JSON.parse(text); } catch { return; }
+              void this.processStateChange({
+                ...(typeof data === 'object' && data ? data : {}),
+                source: 'ws',
+                confidence: 'high',
+              } as never);
+            } catch { /* */ }
+          });
+        });
+      } catch { /* */ }
+
     }
 
     // Verify game is loaded
@@ -375,7 +396,25 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
     }
   }
 
+  getDomHealth(): { missStreak: number; healthy: boolean } {
+    return { missStreak: this.domMissStreak, healthy: this.domMissStreak < 10 };
+  }
+
+  noteDomMiss(missed: boolean): void {
+    this.domMissStreak = missed ? this.domMissStreak + 1 : 0;
+  }
+
   private async setupWsInterception(): Promise<void> {
+    try {
+      await this.options.page.exposeFunction('__crashwaveOnWs', (payload: unknown) => {
+        void this.processStateChange({
+          ...(typeof payload === 'object' && payload ? payload : {}),
+          source: 'ws',
+          confidence: 'high',
+        } as never);
+      });
+    } catch { /* already exposed */ }
+
     // WebSocket interception is set up via page.evaluate
     // This injects a script that intercepts WebSocket messages
     try {
@@ -402,6 +441,7 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
                 const data = JSON.parse(event.data);
                 // Dispatch a custom event that Playwright can listen to
                 window.dispatchEvent(
+                  (window as any).__crashwaveOnWs?.(data);
                   new CustomEvent('bc-game-ws-message', {
                     detail: { url: this.url, data, timestamp: Date.now() },
                   })

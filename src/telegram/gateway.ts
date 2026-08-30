@@ -76,6 +76,28 @@ export class TelegramGateway {
         })
       );
 
+      // Per-user command rate limit
+      const maxPerMin = this.config.rateLimitMessagesPerMinute ?? 30;
+      const userMsgCounts = new Map<number, { n: number; reset: number }>();
+      this.bot.use(async (ctx, next) => {
+        const uid = ctx.from?.id;
+        if (uid == null) return next();
+        const now = Date.now();
+        let w = userMsgCounts.get(uid);
+        if (!w || now > w.reset) {
+          w = { n: 0, reset: now + 60_000 };
+          userMsgCounts.set(uid, w);
+        }
+        w.n += 1;
+        if (w.n > maxPerMin) {
+          try {
+            await ctx.reply('Rate limit exceeded. Try again in a minute.');
+          } catch { /* */ }
+          return;
+        }
+        return next();
+      });
+
       const tenantResolver = this.tenantResolver;
       if (tenantResolver) {
         this.bot.use(async (ctx, next) => {
