@@ -84,7 +84,19 @@ export class ProductionController {
   }
 
   observeOutcome(predicted: number, actual: 0 | 1): DivergenceSnapshot {
-    return this.divergence.observe(predicted, actual);
+    const snap = this.divergence.observe(predicted, actual);
+    // Auto-rollback canary when divergence reaches high levels (3+)
+    if (snap.level >= 3) {
+      const canary = this.lifecycle.list().find((m) => m.stage === 'CANARY');
+      if (canary) {
+        try {
+          this.lifecycle.rollbackTo(canary.modelName, canary.modelVersion);
+        } catch {
+          /* no prior production version */
+        }
+      }
+    }
+    return snap;
   }
 
   manualRecoverDivergence(): DivergenceSnapshot {

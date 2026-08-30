@@ -10,7 +10,16 @@ import { getRedisClient } from '@/persistence/redis-client';
 import { verifyTelegramInitData } from '@/telegram/mini-app';
 import type { Tenant } from '@/platform/types';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'development-secret-change-in-production');
+function resolveJwtSecretBytes(): Uint8Array {
+  const secret = process.env.JWT_SECRET?.trim();
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && (!secret || secret === 'development-secret-change-in-production' || secret.length < 32)) {
+    throw new Error('JWT_SECRET must be set (≥32 chars) in production');
+  }
+  const s = secret || (process.env.NODE_ENV === 'test' ? 'test-jwt-secret-for-unit-tests-only-32chars' : 'development-secret-change-in-production');
+  return new TextEncoder().encode(s);
+}
+const JWT_SECRET = resolveJwtSecretBytes();
 const REFRESH_SECRET = new TextEncoder().encode(process.env.REFRESH_SECRET || 'development-refresh-secret-change-in-production');
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL = '7d';

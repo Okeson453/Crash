@@ -49,7 +49,7 @@ RUN chmod +x ./scripts/*.sh ./scripts/run-migrations.mjs \
 USER crashapp
 EXPOSE 9090 8081
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
-  CMD curl -sf "http://127.0.0.1:${PORT:-${METRICS_PORT:-9090}}/health" || exit 1
+  CMD curl -sf "http://127.0.0.1:${PORT:-3000}/api/v1/health" || exit 1
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

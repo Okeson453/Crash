@@ -22,6 +22,8 @@ function AppContent() {
   if (!isInitialized || isLoading) return <AuthLoadingScreen />;
   if (bootstrapError && !isAuthenticated) return <main className="flex min-h-screen items-center justify-center p-6"><ErrorState message={bootstrapError} onRetry={retry} /></main>;
   if (!isAuthenticated) return <OnboardingScreen />;
-  return <AppLayout><AppRouter /><ToastContainer /><MaintenanceScreen /></AppLayout>;
+  const maintenance = import.meta.env.VITE_MAINTENANCE_MODE === 'true';
+  if (maintenance) return <MaintenanceScreen />;
+  return <AppLayout><AppRouter /><ToastContainer /></AppLayout>;
 }
 export default function App() { return <AppContent />; }

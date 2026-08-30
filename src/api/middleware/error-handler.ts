@@ -8,6 +8,7 @@ interface ApiError {
   error: {
     code: string;
     message: string;
+    details?: unknown;
     requestId?: string;
   };
 }
@@ -32,6 +33,7 @@ export function errorHandler(
       error: {
         code: 'VALIDATION_ERROR',
         message: error.message,
+        details: (error as { details?: unknown }).details,
         requestId,
       },
     });

@@ -58,7 +58,10 @@ export class MultiTargetEngine {
       const cal = params.calibrated[t] ?? raw;
       const hist = params.historicalHitRates[t] ?? raw;
       const ev = cal * t - 1;
-      const shrink = this.policy.shrinkageStrength;
+      // Sample-size aware: shrink = k/(k+n); policy.shrinkageStrength ≈ prior strength k scale
+      const k = Math.max(1, this.policy.shrinkageStrength * 100); // 0.35 → k≈35
+      const n = Math.max(0, params.sampleSize);
+      const shrink = k / (k + n);
       const baselineEV = hist * t - 1;
       const shrunkEV = (1 - shrink) * ev + shrink * baselineEV;
       out.push({

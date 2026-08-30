@@ -10,9 +10,16 @@ import { getEventBusInstance } from '@/app/composition';
 import { miniGameService } from '@/mini-app/game-service';
 import { getLogger } from '@/observability/logger';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'development-secret-change-in-production'
-);
+function resolveJwtSecretBytes(): Uint8Array {
+  const secret = process.env.JWT_SECRET?.trim();
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && (!secret || secret === 'development-secret-change-in-production' || secret.length < 32)) {
+    throw new Error('JWT_SECRET must be set (≥32 chars) in production');
+  }
+  const s = secret || (process.env.NODE_ENV === 'test' ? 'test-jwt-secret-for-unit-tests-only-32chars' : 'development-secret-change-in-production');
+  return new TextEncoder().encode(s);
+}
+const JWT_SECRET = resolveJwtSecretBytes();
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
@@ -26,7 +33,16 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     path: '/socket.io',
     cors: {
-      origin: process.env.CORS_ORIGIN || true,
+      origin: (() => {
+        const isProd = process.env.NODE_ENV === 'production';
+        const raw = process.env.CORS_ORIGIN?.trim();
+        if (isProd && (!raw || raw === 'true' || raw === '*')) {
+          throw new Error('CORS_ORIGIN must be explicit in production (websocket)');
+        }
+        if (!raw || raw === 'true') return true;
+        if (raw === '*') return true;
+        return raw.split(',').map((s) => s.trim());
+      })(),
       credentials: true,
     },
     transports: ['websocket'],

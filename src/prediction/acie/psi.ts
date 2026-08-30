@@ -115,7 +115,7 @@ export class PredictiveSequenceIntelligence {
     const modelUncertainty = Math.sqrt(varianceInPlace(this.probScratch, nModels));
     const dataN = history.length > crashPoints.length ? history.length : crashPoints.length;
     const dataUncertainty = 1 / Math.sqrt(dataN > 0 ? dataN : 1);
-    const ci = this.bootstrapInterval(estimatedProbability, modelUncertainty);
+    const ci = this.parametricUncertaintyInterval(estimatedProbability, modelUncertainty);
 
     return {
       target: ACIE_TARGET,
@@ -315,7 +315,8 @@ export class PredictiveSequenceIntelligence {
     for (let i = 0; i < n; i++) this.weightScratch[i] *= inv;
   }
 
-  private bootstrapInterval(
+  /** Parametric normal-approx interval from model uncertainty — not resampling bootstrap. */
+  private parametricUncertaintyInterval(
     mean: number,
     modelUnc: number
   ): [number, number] {

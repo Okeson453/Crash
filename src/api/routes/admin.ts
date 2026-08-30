@@ -13,6 +13,9 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { globalLiveDivergence } from '@/prediction/validation/live-divergence-monitor';
+import { globalProductionController } from '@/prediction/lifecycle/production-controller';
+import { getLogger } from '@/observability/logger';
 import { z } from 'zod';
 import { authenticateRequest } from '@/api/middleware/auth';
 import { requireRole } from '@/api/middleware/role-guard';
@@ -512,4 +515,48 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     }
     reply.send({ data });
   });
+
+  /**
+   * POST /admin/sheath/recover — clear Level-5 divergence halt (requires confirm:true)
+   */
+  fastify.post('/sheath/recover', { preHandler: requireRole('admin') }, async (request, reply) => {
+    z.object({ confirm: z.literal(true) }).parse(request.body ?? {});
+    try {
+      globalLiveDivergence.manualRecover(true);
+      globalProductionController.manualRecoverDivergence();
+      getLogger().warn(
+        {
+          component: 'AdminAPI',
+          userId: request.auth?.userId,
+          action: 'sheath_recover',
+        },
+        'Operator cleared prediction sheath / divergence'
+      );
+      // Best-effort audit
+      try {
+        const pool = getPool();
+        await pool.query(
+          `INSERT INTO audit_logs (actor_id, action, resource, detail) VALUES ($1,$2,$3,$4)`,
+          [request.auth?.userId ?? null, 'sheath_recover', 'prediction', JSON.stringify({ confirm: true })]
+        );
+      } catch { /* audit table may vary */ }
+      reply.send({ data: { recovered: true, divergence: globalLiveDivergence.evaluate() } });
+    } catch (err) {
+      reply.status(400).send({
+        error: {
+          code: 'RECOVER_FAILED',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  });
+
+  // Gate unfinished surfaces with 501 rather than fake data
+  for (const path of ['/activity', '/billing/invoices', '/compliance/reports'] as const) {
+    fastify.all(path, async (_req, reply) => {
+      reply.status(501).send({
+        error: { code: 'NOT_IMPLEMENTED', message: `${path} is not implemented` },
+      });
+    });
+  }
 }

@@ -40,8 +40,10 @@ export function createPool(config: DatabaseConfig): Pool {
 
   // Do NOT run concurrent client.query() in the connect handler — that races the
   // consumer's first query. Tenant GUCs are applied in withTenantContext / query paths.
-  pool.on('connect', () => {
-    getLogger().debug({ component: 'Database' }, 'New database connection established');
+  pool.on('connect', (client) => {
+    const timeoutMs = Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15000);
+    void client.query(`SET statement_timeout = ${timeoutMs}`).catch(() => undefined);
+    getLogger().debug({ component: 'Database', statementTimeoutMs: timeoutMs }, 'New database connection established');
   });
 
   return pool;

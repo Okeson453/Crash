@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { HashRouter } from 'react-router-dom';
 import App from '@/App';
 import { ErrorBoundary } from '@/components/errors/ErrorBoundary';
 import { AppProviders } from '@/providers/AppProviders';
@@ -23,12 +23,12 @@ if (!root) {
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <HashRouter>
       <AppProviders>
         <ErrorBoundary>
           <App />
         </ErrorBoundary>
       </AppProviders>
-    </BrowserRouter>
+    </HashRouter>
   </React.StrictMode>
 );
