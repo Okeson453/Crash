@@ -6,6 +6,7 @@
  */
 
 import { getLogger } from '../observability/logger.js';
+import { assertNoMockAdapterInProduction } from './adapters/browser.js';
 
 export type ExecutionMode = 'live' | 'dry-run' | 'observe-only' | 'maintenance';
 
@@ -28,7 +29,7 @@ export function resolvePlacementPath(opts: {
       );
       return { path: 'none' };
     }
-    return { path: 'live-bet-executor' };
+    return { path: 'live-bet-executor' }; // LiveBetExecutor owns Playwright path
   }
   if (opts.mode === 'dry-run' && opts.mockBound) {
     return { path: 'mock-bet-executor' };

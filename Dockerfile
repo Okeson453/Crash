@@ -28,7 +28,8 @@ FROM base AS production
 ENV NODE_ENV=production \
     BROWSER_HEADLESS=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PORT=9090 \
+    API_PORT=8081 \
+    PORT=8081 \
     METRICS_PORT=9090
 RUN groupadd -r crashapp && useradd -r -g crashapp -m -d /home/crashapp crashapp
 WORKDIR /app
@@ -49,7 +50,7 @@ RUN chmod +x ./scripts/*.sh ./scripts/run-migrations.mjs \
 USER crashapp
 EXPOSE 9090 8081
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
-  CMD curl -sf "http://127.0.0.1:${PORT:-3000}/api/v1/health" || exit 1
+  CMD curl -sf "http://127.0.0.1:${API_PORT:-${PORT:-8081}}/api/v1/health/ready" || curl -sf "http://127.0.0.1:${API_PORT:-${PORT:-8081}}/api/v1/health" || exit 1
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
@@ -76,6 +77,6 @@ RUN chmod +x ./scripts/*.sh ./scripts/run-migrations.mjs \
 USER crashapp
 EXPOSE 8081 9090
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-  CMD curl -sf "http://127.0.0.1:${PORT:-8081}/api/v1/health" || exit 1
+  CMD curl -sf "http://127.0.0.1:${API_PORT:-8081}/api/v1/health/ready" || curl -sf "http://127.0.0.1:${API_PORT:-8081}/api/v1/health" || exit 1
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

@@ -52,6 +52,8 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
       // Multi-source observation enabled by default (P0.4). Feature flags can still disable.
       enableWsAdapter: true,
       enableApiAdapter: true,
+      primarySource: (process.env.GAME_PRIMARY_SOURCE as 'ws' | 'api' | 'dom') || 'ws',
+      enableApiAdapter: true,
       pollIntervalMs: TIMEOUTS.domAdapterPollInterval,
       ...options,
     };
@@ -82,7 +84,7 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
     this.logger.info({ component: 'GameAdapter' }, 'Starting game adapter');
     this.started = true;
 
-    // Set up DOM polling as the primary observation method for Batch 2
+    // DOM polling as fallback; primarySource prefers ws/api (GAME_PRIMARY_SOURCE)
     if (this.options.enableDomAdapter) {
       this.startDomPolling();
     }

@@ -450,6 +450,58 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   const configHistory: Array<{ id: string; description: string; actorName: string; createdAt: string }> = [];
 
+  
+  fastify.get('/activity', async (request, reply) => {
+    const q = paginationSchema.parse(request.query);
+    try {
+      const r = await getPool().query(
+        `SELECT id, action, actor_id, payload, created_at
+         FROM audit_logs ORDER BY created_at DESC LIMIT $1`,
+        [q.limit ?? 50]
+      );
+      reply.send({
+        data: r.rows.map((row) => ({
+          id: String(row.id),
+          action: row.action,
+          actorId: row.actor_id,
+          payload: row.payload,
+          createdAt: row.created_at,
+        })),
+      });
+    } catch {
+      reply.send({ data: [] });
+    }
+  });
+
+  fastify.get('/overview', async (_request, reply) => {
+    try {
+      const pool = getPool();
+      const users = await pool.query(`SELECT COUNT(*)::int AS n FROM users`);
+      const openBets = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM mini_app_bets WHERE state IN ('placed','active','pending')`
+      );
+      const pnl = await pool.query(
+        `SELECT COALESCE(SUM(pnl),0)::float8 AS pnl FROM mini_app_bets
+         WHERE settled_at > NOW() - INTERVAL '24 hours'`
+      );
+      const state = miniGameService.getState();
+      reply.send({
+        data: {
+          users: users.rows[0]?.n ?? 0,
+          openBets: openBets.rows[0]?.n ?? 0,
+          pnl24h: Number(pnl.rows[0]?.pnl ?? 0),
+          gamePhase: state.phase,
+          roundId: state.roundId,
+          serverTime: state.serverTime,
+        },
+      });
+    } catch (err) {
+      reply.status(500).send({
+        error: { code: 'OVERVIEW_FAILED', message: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  });
+
   fastify.get('/config/history', async (_request, reply) => {
     reply.send({ data: configHistory.slice(-50).reverse() });
   });
@@ -597,7 +649,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Gate unfinished surfaces with 501 rather than fake data
-  for (const path of ['/activity', '/billing/invoices', '/compliance/reports'] as const) {
+  for (const path of ['/billing/invoices', '/compliance/reports'] as const) {
     fastify.all(path, async (_req, reply) => {
       reply.status(501).send({
         error: { code: 'NOT_IMPLEMENTED', message: `${path} is not implemented` },

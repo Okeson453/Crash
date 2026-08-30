@@ -31,9 +31,10 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
         if (isProd && (!raw || raw === 'true' || raw === '*')) {
           throw new Error('CORS_ORIGIN must be explicit in production (websocket)');
         }
-        if (!raw || raw === 'true') return true;
-        if (raw === '*') return true;
-        return raw.split(',').map((s) => s.trim());
+        if (!raw || raw === 'true' || raw === '*') {
+          return isProd ? false : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+        }
+        return raw.split(',').map((s) => s.trim()).filter(Boolean);
       })(),
       credentials: true,
     },

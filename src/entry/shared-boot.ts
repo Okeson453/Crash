@@ -3,6 +3,7 @@
  */
 
 import { loadAndValidateConfig, resolveProcessRole } from '../config/loader.js';
+import { assertAuthSecretsAtBoot } from '../config/jwt-secret.js';
 import type { AppConfig } from '../config/schema.js';
 import { createPool } from '../persistence/client.js';
 import { resolveDatabasePoolSize } from '../persistence/pool-size.js';
@@ -10,6 +11,7 @@ import { createRedisClient } from '../persistence/redis-client.js';
 import { getLogger } from '../observability/logger.js';
 
 export function bootConfig(): AppConfig {
+  assertAuthSecretsAtBoot();
   return loadAndValidateConfig();
 }
 

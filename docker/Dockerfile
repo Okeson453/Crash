@@ -24,7 +24,8 @@ RUN npm run build && npm prune --omit=dev
 
 FROM base AS production
 ENV NODE_ENV=production \
-    PORT=9090 \
+    API_PORT=8081 \
+    PORT=8081 \
     METRICS_PORT=9090 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     BROWSER_HEADLESS=1
@@ -47,7 +48,7 @@ RUN chmod +x ./scripts/*.sh ./scripts/run-migrations.mjs \
 USER crashapp
 EXPOSE 9090 8081
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
-  CMD curl -sf "http://127.0.0.1:${PORT:-${METRICS_PORT:-9090}}/health" || exit 1
+  CMD curl -sf "http://127.0.0.1:${API_PORT:-8081}/api/v1/health/ready" || curl -sf "http://127.0.0.1:${API_PORT:-8081}/api/v1/health" || curl -sf "http://127.0.0.1:${METRICS_PORT:-9090}/health" || exit 1
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]

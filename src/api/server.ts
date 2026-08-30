@@ -72,12 +72,13 @@ export async function createApiServer(): Promise<FastifyInstance> {
     if (isProd && (!raw || raw === 'true' || raw === '*')) {
       throw new Error('CORS_ORIGIN must be an explicit comma-separated allow-list in production');
     }
-    const origin =
-      !raw || raw === 'true'
-        ? true
-        : raw === '*'
-          ? true
-          : raw.split(',').map((s) => s.trim()).filter(Boolean);
+    const devDefault = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
+    let origin: boolean | string[];
+    if (!raw || raw === 'true' || raw === '*') {
+      origin = isProd ? false : devDefault;
+    } else {
+      origin = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    }
     await fastify.register(cors, {
       origin,
       credentials: true,

@@ -10,9 +10,9 @@ import { getRedisClient } from '@/persistence/redis-client';
 import { verifyTelegramInitData } from '@/telegram/mini-app';
 import type { Tenant } from '@/platform/types';
 
-import { resolveJwtSecretBytes } from '@/config/jwt-secret';
+import { resolveJwtSecretBytes, resolveRefreshSecretBytes } from '@/config/jwt-secret';
 const JWT_SECRET = resolveJwtSecretBytes();
-const REFRESH_SECRET = new TextEncoder().encode(process.env.REFRESH_SECRET || 'development-refresh-secret-change-in-production');
+const REFRESH_SECRET = resolveRefreshSecretBytes();
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL = '7d';
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
