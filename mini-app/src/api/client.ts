@@ -4,6 +4,12 @@ import { getOrCreateSessionId } from '@/lib/storage';
 import { logger } from '@/utils/logger';
 import type { ApiError, ApiResponse } from '@/types/api';
 
+
+function newRequestId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 let authToken: string | null = null;
 export function setAuthToken(token: string | null): void { authToken = token; }
 export function getAuthToken(): string | null { return authToken; }
@@ -44,11 +50,13 @@ export async function apiRequest<T>(endpoint: string, config: RequestConfig = {}
   headers.set('Content-Type', 'application/json');
   headers.set('Accept', 'application/json');
   headers.set('X-Session-Id', getOrCreateSessionId());
+  headers.set('X-Request-ID', newRequestId());
   if (!skipAuth && authToken) headers.set('Authorization', `Bearer ${authToken}`);
   const started = performance.now();
   try {
     const response = await fetch(url, { ...fetchConfig, headers });
-    logger.debug('HTTP request completed', { endpoint, method: fetchConfig.method ?? 'GET', status: response.status, durationMs: performance.now() - started });
+    logger.debug( // correlation via X-Request-ID / X-Session-Id
+    'HTTP request completed', { endpoint, method: fetchConfig.method ?? 'GET', status: response.status, durationMs: performance.now() - started });
     return await handleResponse<T>(response);
   } catch (error) {
     if (error instanceof TypeError) throw new NetworkError();

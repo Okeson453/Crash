@@ -138,7 +138,8 @@ export async function createApiServer(): Promise<FastifyInstance> {
     const swaggerUi = swaggerUiMod.default ?? swaggerUiMod;
     await fastify.register(swagger as never, {
       openapi: {
-        info: { title: 'CrashWave API', version: '1.0.0' },
+        info: { title: 'CrashWave API',
+          description: 'Control plane API. Prediction signals are heuristic ensembles (not ML). Standard errors: { error: { code, message, details, requestId } }.', version: '1.0.0' },
         components: {
           securitySchemes: {
             bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },

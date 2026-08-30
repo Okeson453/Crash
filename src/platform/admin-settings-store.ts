@@ -1,19 +1,31 @@
 /**
- * Durable platform admin settings (tenant / RG / webhooks).
+ * Durable platform admin settings (PostgreSQL) with process-local cache.
  */
 import { getPool } from '@/persistence/client';
 
+const cache = new Map<string, { value: unknown; at: number }>();
+const CACHE_TTL_MS = Number(process.env.ADMIN_SETTINGS_CACHE_MS ?? 30_000);
+
 export async function loadAdminSetting<T>(key: string, fallback: T): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    return { ...fallback, ...(hit.value as object) } as T;
+  }
   const pool = getPool();
   try {
     const result = await pool.query(
       `SELECT value FROM platform_admin_settings WHERE key = $1`,
       [key]
     );
-    if (!result.rows[0]?.value) return fallback;
-    return { ...fallback, ...(result.rows[0].value as object) } as T;
+    if (!result.rows[0]?.value) {
+      cache.set(key, { value: fallback, at: Date.now() });
+      return fallback;
+    }
+    const merged = { ...fallback, ...(result.rows[0].value as object) } as T;
+    cache.set(key, { value: result.rows[0].value, at: Date.now() });
+    return merged;
   } catch {
-    return fallback;
+    return hit ? ({ ...fallback, ...(hit.value as object) } as T) : fallback;
   }
 }
 
@@ -23,21 +35,22 @@ export async function saveAdminSetting(
   updatedBy?: string
 ): Promise<void> {
   const pool = getPool();
-  try {
-    await pool.query(
-      `INSERT INTO platform_admin_settings (key, value, updated_at, updated_by)
-       VALUES ($1, $2::jsonb, NOW(), $3)
-       ON CONFLICT (key) DO UPDATE SET
-         value = EXCLUDED.value,
-         updated_at = NOW(),
-         updated_by = EXCLUDED.updated_by`,
-      [key, JSON.stringify(value), updatedBy ?? null]
-    );
-  } catch {
-    /* migration may not be applied yet — swallow so API still works in-memory */
-  }
+  await pool.query(
+    `INSERT INTO platform_admin_settings (key, value, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, NOW(), $3)
+     ON CONFLICT (key) DO UPDATE SET
+       value = EXCLUDED.value,
+       updated_at = NOW(),
+       updated_by = EXCLUDED.updated_by`,
+    [key, JSON.stringify(value), updatedBy ?? null]
+  );
+  cache.set(key, { value, at: Date.now() });
 }
 
+export function invalidateAdminSettingCache(key?: string): void {
+  if (key) cache.delete(key);
+  else cache.clear();
+}
 
 export async function saveConfigVersion(
   key: string,
@@ -81,5 +94,12 @@ export async function listConfigVersions(
     }));
   } catch {
     return [];
+  }
+}
+
+/** Hydrate defaults from DB at process start */
+export async function hydrateAdminSettingsDefaults(keys: string[]): Promise<void> {
+  for (const key of keys) {
+    await loadAdminSetting(key, {});
   }
 }

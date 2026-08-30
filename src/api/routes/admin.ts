@@ -34,7 +34,7 @@ import {
   listReferralsByStatus,
   listRewardLedger,
 } from '@/platform/referrals/admin-referral-service';
-import { loadAdminSetting, saveAdminSetting, saveConfigVersion, listConfigVersions } from '@/platform/admin-settings-store';
+import { loadAdminSetting, saveAdminSetting, saveConfigVersion, listConfigVersions, hydrateAdminSettingsDefaults } from '@/platform/admin-settings-store';
 import { revokeReward } from '@/platform/referrals/reward-service';
 import {
   listBrowserSessions,
@@ -62,7 +62,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.addHook('preHandler', authenticateRequest);
   fastify.addHook('preHandler', requireRole('operator', 'admin'));
 
-  // In-memory tenant/compliance/integration settings (per-process; replace with DB later)
+  // Process cache defaults; authoritative store is platform_admin_settings (PostgreSQL)
   const runtimeAdminSettings: {
     tenant: {
       identity: { displayName: string; slug: string; description: string };
@@ -82,6 +82,13 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     webhooks: { betEvents: '', roundEvents: '', userEvents: '' },
     telegramWebhook: null,
   };
+
+  // Warm cache from DB (non-blocking)
+  void hydrateAdminSettingsDefaults(['tenant', 'rg', 'webhooks', 'betting_config']).then(async () => {
+    runtimeAdminSettings.tenant = await loadAdminSetting('tenant', runtimeAdminSettings.tenant);
+    runtimeAdminSettings.rg = await loadAdminSetting('rg', runtimeAdminSettings.rg);
+    runtimeAdminSettings.webhooks = await loadAdminSetting('webhooks', runtimeAdminSettings.webhooks);
+  });
 
 
   const defaultBettingConfig = {

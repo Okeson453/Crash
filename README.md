@@ -8,6 +8,10 @@ The repository contains the core platform services, player-facing Mini App, stan
 
 «Current status: The repository has undergone a production-readiness implementation and re-audit checkpoint. Major architecture, security, authentication, RBAC, game-state, betting, administration, observability, deployment, and testing foundations are present. Engineering remediation Phases 1–5 are implemented in-tree. Final production sign-off is tracked in `docs/PRODUCTION_SIGNOFF_CHECKLIST.md` and remains dependent on ops gates (live integration, E2E, load, Lighthouse, security, compliance) in the target environment.»
 
+> **Prediction honesty:** CrashWave uses calibrated **heuristic / statistical ensemble** signals (ACIE), not trained neural nets. Signals are labeled `heuristic` / `trainable: false` in the API. Historical analytics describe observed behavior; **no predictive profitability is guaranteed**.
+
+
+
 ---
 
 Table of Contents
@@ -501,7 +505,7 @@ Mini App
      ├── Audit Logs
      └── Operations
 
-The repository currently provides the implemented administrative foundation and additional operational architecture, while some advanced operational screens remain subject to the final production-readiness verification described below.
+The repository currently provides the implemented administrative foundation and additional operational architecture, while some admin operational screens (subset production-ready) remain subject to the final production-readiness verification described below.
 
 ---
 
@@ -607,7 +611,7 @@ src/analytics/
 
 and player-facing analytics components exist within the Mini App.
 
-Analytics is intended to describe observed historical behavior and operational metrics rather than represent guaranteed predictive profitability.
+Analytics is intended to describe observed historical behavior and operational metrics rather than represent guaranteed returns (not offered).
 
 Relevant metrics include:
 

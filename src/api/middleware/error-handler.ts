@@ -18,7 +18,9 @@ export function errorHandler(
   request: FastifyRequest,
   reply: FastifyReply
 ): void {
-  const requestId = request.id as string;
+  const requestId =
+    (typeof request.headers['x-request-id'] === 'string' && request.headers['x-request-id']) ||
+    (request.id as string);
 
   request.log.error({
     err: error,
@@ -66,7 +68,7 @@ export function errorHandler(
   const statusCode = error.statusCode || 500;
   const response: ApiError = {
     error: {
-      code: error.code || 'INTERNAL_ERROR',
+      code: String(error.code || 'INTERNAL_ERROR').toUpperCase().replace(/\s+/g, '_'),
       message: statusCode >= 500 ? 'Internal server error' : error.message,
       details: statusCode >= 500 ? undefined : (error as { details?: unknown }).details,
       requestId,
