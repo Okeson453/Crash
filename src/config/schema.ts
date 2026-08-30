@@ -250,6 +250,10 @@ export const AppConfigSchema = z.object({
   specUpgrade: SpecUpgradeConfigSchema.default({}),
   system: z.object({
     mode: SystemMode.default('dry-run'),
+    /** Process role for multi-runtime deploy (Phase process-split) */
+    processRole: z
+      .enum(['control-plane', 'automation-worker', 'mini-app-game', 'all'])
+      .default('all'),
     logLevel: LogLevel.default('info'),
     serviceName: z.string().min(1).default('bc-game-crash-automation'),
     apiPort: z.number().int().min(1).max(65535).default(8081),

@@ -248,3 +248,14 @@ function broadcast(type: string, payload: Record<string, unknown>): void {
 export function getIO(): SocketIOServer | null {
   return io;
 }
+
+/** Fan out mini-game events to connected sockets (control-plane) */
+export function broadcastGameEvent(name: string, payload: Record<string, unknown>): void {
+  if (!io) return;
+  io.to('game:default').emit(name, payload);
+  // also emit on tenant rooms if payload has tenantId
+  const tenantId = payload.tenantId != null ? String(payload.tenantId) : null;
+  if (tenantId) {
+    io.to(`game:${tenantId}`).emit(name, payload);
+  }
+}

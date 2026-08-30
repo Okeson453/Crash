@@ -7,6 +7,7 @@ import { AppConfig } from './schema';
 export const DEFAULT_CONFIG: AppConfig = {
   system: {
     mode: 'dry-run',
+    processRole: 'all',
     logLevel: 'info',
     serviceName: 'bc-game-crash-automation',
     apiPort: 8081,

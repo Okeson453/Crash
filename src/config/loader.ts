@@ -105,7 +105,39 @@ export function loadAndValidateConfig(configPath?: string): AppConfig {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('\n');
     throw new Error(`Configuration validation failed:\n${issues}`);
   }
-  return applyTenantEnvOverrides(parsed.data);
+  let config = applyTenantEnvOverrides(parsed.data);
+  config = applyProcessRoleEnv(config);
+  return config;
+}
+
+/** PROCESS_ROLE / PLATFORM_MODE → system.processRole */
+export function applyProcessRoleEnv(config: AppConfig): AppConfig {
+  const fromEnv =
+    process.env.PROCESS_ROLE?.trim() ||
+    (process.env.PLATFORM_MODE === 'control-plane' ? 'control-plane' : undefined) ||
+    process.env.APP_SYSTEM__PROCESS_ROLE?.trim();
+  if (!fromEnv) return config;
+  const role = fromEnv as AppConfig['system']['processRole'];
+  if (!['control-plane', 'automation-worker', 'mini-app-game', 'all'].includes(role)) {
+    return config;
+  }
+  return {
+    ...config,
+    system: {
+      ...config.system,
+      processRole: role,
+    },
+  };
+}
+
+export function resolveProcessRole(config?: AppConfig): AppConfig['system']['processRole'] {
+  const fromEnv =
+    process.env.PROCESS_ROLE?.trim() ||
+    (process.env.PLATFORM_MODE === 'control-plane' ? 'control-plane' : undefined);
+  if (fromEnv && ['control-plane', 'automation-worker', 'mini-app-game', 'all'].includes(fromEnv)) {
+    return fromEnv as AppConfig['system']['processRole'];
+  }
+  return config?.system?.processRole ?? 'all';
 }
 
 /**

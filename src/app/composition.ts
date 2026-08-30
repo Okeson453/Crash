@@ -314,6 +314,22 @@ export function composeApplication(
   };
 
   async function start(): Promise<void> {
+    const role =
+      process.env.PROCESS_ROLE ??
+      config.system.processRole ??
+      'all';
+    const runAutomation = role === 'automation-worker' || role === 'all';
+    // control-plane side: outbox already started during composeApplication()
+
+    if (!runAutomation) {
+      logger.info(
+        { component: 'Composition', role },
+        'Skipping automation subsystems (workers/supervisor/prewarm)'
+      );
+      // control-plane still benefits from outbox already started in compose
+      return;
+    }
+
     logger.info({ component: 'Composition', mode: config.system.mode, host: hostname() }, 'Starting composition root');
 
     if (instanceLock && (config.system.mode === 'live' || config.system.mode === 'dry-run')) {

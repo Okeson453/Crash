@@ -27,7 +27,7 @@
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f app",
     "dev:control-plane": "PLATFORM_MODE=control-plane tsx src/index.ts",
-    "start:control-plane": "PLATFORM_MODE=control-plane node dist/index.js",
+    "start:control-plane": "PROCESS_ROLE=control-plane node dist/index.js",
     "watchdog:capital": "tsx scripts/capital-watchdog.ts",
     "test:unit:spec": "jest tests/unit/capital tests/unit/protocol tests/unit/risk tests/unit/network tests/unit/core tests/unit/settlement --passWithNoTests",
     "db:migrate:ts": "tsx scripts/db-migrate.ts",
@@ -39,7 +39,10 @@
     "test:security": "jest --testPathPattern=tests/unit/security --passWithNoTests",
     "test:referrals": "jest --testPathPattern=tests/unit/referrals --passWithNoTests",
     "bench:prediction": "node scripts/prediction-perf-bench.mjs",
-    "validate:randomness": "node -e \"console.log('Use runRandomnessGate from app with \u226550k rounds')\""
+    "validate:randomness": "node -e \"console.log('Use runRandomnessGate from app with \u226550k rounds')\"",
+    "start:automation": "PROCESS_ROLE=automation-worker node dist/index.js",
+    "start:mini-game": "PROCESS_ROLE=mini-app-game node dist/index.js",
+    "start:monolith": "PROCESS_ROLE=all node dist/index.js"
   },
   "keywords": [
     "automation",

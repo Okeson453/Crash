@@ -1,0 +1,38 @@
+# Three-runtime split (shared Postgres + Redis)
+services:
+  control-plane:
+    build: .
+    environment:
+      PROCESS_ROLE: control-plane
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      NODE_ENV: production
+    ports:
+      - "8081:8081"
+      - "9090:9090"
+
+  automation-worker:
+    build: .
+    environment:
+      PROCESS_ROLE: automation-worker
+      APP_SYSTEM__MODE: ${APP_SYSTEM__MODE:-dry-run}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+      METRICS_PORT: "9091"
+    # no public API port
+
+  mini-app-game:
+    build: .
+    environment:
+      PROCESS_ROLE: mini-app-game
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINI_GAME_HEALTH_PORT: "8092"
+      NODE_ENV: production
+    ports:
+      - "8092:8092"
+    deploy:
+      replicas: 1
