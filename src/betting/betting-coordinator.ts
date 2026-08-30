@@ -195,6 +195,9 @@ export class BettingCoordinator {
       if (decision.signal?.target && Number.isFinite(decision.signal.target)) {
         this.lastCashOutTarget = decision.signal.target;
         this.lastCashOutTargetByRound.set(roundId, decision.signal.target);
+        this.lastSignalExpiresAt = decision.signal.expiresAt
+          ? new Date(decision.signal.expiresAt).getTime()
+          : null;
       } else {
         this.lastCashOutTarget =
           (this.config as { betting?: { cashOutTarget?: number } }).betting?.cashOutTarget ?? 1.3;
@@ -449,13 +452,16 @@ export class BettingCoordinator {
     this.machine.send({ type: 'BET_SUBMITTED', betId });
 
     try {
-      const result = // TOCTOU: re-check prediction signal expiry immediately before placement
-        if (decision?.signal?.expiresAt && new Date(decision.signal.expiresAt).getTime() < Date.now()) {
-          this.logger.warn({ component: 'BettingCoordinator', roundId }, 'Signal expired before placement');
-          this.machine.send({ type: 'RISK_REJECTED', reason: 'SIGNAL_EXPIRED' });
-          return;
-        }
-        await this.liveBetExecutor.placeLiveBet({
+      // TOCTOU: re-check prediction signal expiry immediately before placement
+      if (
+        this.lastSignalExpiresAt != null &&
+        this.lastSignalExpiresAt < Date.now()
+      ) {
+        this.logger.warn({ component: 'BettingCoordinator', roundId }, 'Signal expired before placement');
+        this.machine.send({ type: 'RISK_REJECTED', reason: 'SIGNAL_EXPIRED' });
+        return;
+      }
+      const result = await this.liveBetExecutor.placeLiveBet({
         betId,
         roundId,
         sessionId,

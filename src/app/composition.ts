@@ -65,6 +65,7 @@ import { EnsembleOrchestrator } from '../prediction/ensemble';
 import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
 import { SettlementReconciler } from '../background-workers/settlement-reconciler';
+import { startPredictionValidationJob } from '../background-workers/prediction-validation-job';
 import { setPrewarmResult, isReadyForLive } from '../observability/readiness';
 import { loadPredictionStackOnBoot, saveSnapshotToFile, saveSnapshotToRedis } from '../prediction/state/state-persistence';
 import { loadApprovedEnsembleFlags } from '../prediction/ensemble/promotion-evidence';
