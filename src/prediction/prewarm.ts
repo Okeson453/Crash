@@ -12,6 +12,7 @@ import { featureHotCache } from '../observability/performance/hot-cache.js';
 import { globalFeatureEngineV2 } from './features/feature-engine-v2.js';
 import { globalModelLifecycle } from './lifecycle/model-lifecycle.js';
 import { runRandomnessGate, applyRandomnessGateToFlags } from './validation/randomness-gate.js';
+import { loadSnapshotFromFile, saveSnapshotToFile } from './state/state-persistence.js';
 import { globalEnsemble } from './ensemble/ensemble-orchestrator.js';
 import { globalLookaheadEngine } from './lookahead/lookahead-engine.js';
 
@@ -25,6 +26,10 @@ export interface PrewarmResult {
   calibrationWarm: boolean;
   durationMs: number;
   sequenceModelsEnabled?: boolean;
+}
+
+export async function tryRestorePredictionStack(): Promise<boolean> {
+  return loadSnapshotFromFile();
 }
 
 export async function prewarmPredictionStack(
@@ -120,6 +125,11 @@ export async function prewarmPredictionStack(
       'Randomness gate skipped'
     );
   }
+
+  // Phase 3.1 — persist snapshot after warm (file; Redis optional at composition)
+  try {
+    await saveSnapshotToFile();
+  } catch { /* */ }
 
   const durationMs = performance.now() - t0;
   const result: PrewarmResult = {

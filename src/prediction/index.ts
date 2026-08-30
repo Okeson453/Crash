@@ -62,3 +62,13 @@ export {
 export { runRegimeFitJob, featureRowsFromCrashPoints } from './regimes/regime-fit-job.js';
 export { computeGroupImportance, DEFAULT_FEATURE_GROUPS } from './features/feature-importance.js';
 export { fitRegimesOffline } from './workers/regime-fit-offload.js';
+
+export { runAcieWalkForward } from './backtesting/acie-walk-forward.js';
+export {
+  snapshotPredictionStack,
+  loadPredictionStackOnBoot,
+  saveSnapshotToFile,
+  loadSnapshotFromFile,
+} from './state/state-persistence.js';
+export { BrowserWorkerHttpClient, shouldUseRemoteBrowserWorker } from '../browser/worker/http-client.js';
+export type { RiskInputProvider } from '../betting/risk-input-provider.js';

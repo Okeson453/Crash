@@ -9,6 +9,27 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: crash_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -20,7 +41,6 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
-        continue-on-error: true
       - run: npx jest --testPathPattern=tests/unit --passWithNoTests --ci
       - run: npm run build
 
@@ -58,4 +78,3 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx jest --testPathPattern=tests/unit/(security|referrals) --ci --passWithNoTests
       - run: npm audit --audit-level=high
-        continue-on-error: true

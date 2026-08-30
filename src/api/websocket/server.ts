@@ -42,6 +42,32 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
     pingInterval: 30000,
   });
 
+  // Phase 3.2 — Redis adapter for multi-instance (separate pub/sub clients)
+  void (async () => {
+    try {
+      const redisUrl = process.env.REDIS_URL || process.env.SOCKET_REDIS_URL;
+      if (!redisUrl || !io) return;
+      // Dynamic import so package remains optional at build time
+      // @ts-expect-error optional dependency
+      const adapterMod = await import('@socket.io/redis-adapter');
+      const ioredis = await import('ioredis');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const RedisAny: any = (ioredis as any).Redis || (ioredis as any).default || ioredis;
+      const pubClient = new RedisAny(redisUrl, { maxRetriesPerRequest: null });
+      const subClient = pubClient.duplicate();
+      const createAdapter = adapterMod.createAdapter || adapterMod.default?.createAdapter;
+      if (typeof createAdapter === 'function') {
+        io.adapter(createAdapter(pubClient, subClient));
+        getLogger().info({ component: 'MiniAppWebSocket' }, 'Socket.IO Redis adapter attached');
+      }
+    } catch (err) {
+      getLogger().warn(
+        { component: 'MiniAppWebSocket', error: String(err) },
+        'Socket.IO Redis adapter not attached (single-instance mode)'
+      );
+    }
+  })();
+
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {

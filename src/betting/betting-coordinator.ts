@@ -16,7 +16,8 @@ import {
 import { StateMachineConfig, StateMachineEvent } from '../core/state-machine/types.js';
 import { EntryConditions } from '../types/betting.js';
 import { RoundState } from '../types/game.js';
-import { RiskEvaluationInput, RiskConditionResults } from './types.js';
+import { RiskConditionResults } from './types.js';
+import type { RiskInputProvider } from './risk-input-provider.js';
 import { EntryDecisionService } from '../prediction/entry-decision-service.js';
 import { LiveBetExecutor } from './live-executor.js';
 import { AppConfig } from '../config/schema.js';
@@ -32,7 +33,7 @@ export interface BettingCoordinatorOptions {
   entryDecisionService: EntryDecisionService;
   liveBetExecutor?: LiveBetExecutor | null;
   /** Build risk input from current system state (balance, health, ledger, etc.) */
-  buildRiskInput: () => RiskEvaluationInput | Promise<RiskEvaluationInput>;
+  buildRiskInput: RiskInputProvider;
   sessionId?: string | null;
   onStateChange?: (from: string, to: string, event: StateMachineEvent) => void;
   /** Called after a bet is confirmed placed (for daily ledger counter) */
@@ -68,7 +69,7 @@ export class BettingCoordinator {
   private readonly machine: BettingStateMachine;
   private readonly entryDecisionService: EntryDecisionService;
   private readonly liveBetExecutor: LiveBetExecutor | null;
-  private readonly buildRiskInput: () => RiskEvaluationInput | Promise<RiskEvaluationInput>;
+  private readonly buildRiskInput: RiskInputProvider;
   private readonly config: AppConfig;
   private sessionId: string | null;
   private lastPredictionId: string | null = null;

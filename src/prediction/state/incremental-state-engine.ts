@@ -288,6 +288,19 @@ export class IncrementalStateEngine {
   isWarm(minCount = 50): boolean {
     return this.count >= minCount;
   }
+  /** Recent crash points for snapshot persistence (oldest→newest, capped) */
+  getRecentPoints(max = 2000): number[] {
+    const n = Math.min(max, this.lagLen, this.lagRing.length);
+    if (n <= 0) return [];
+    const out: number[] = [];
+    // lagRing is circular: lagPos points to next write
+    const start = (this.lagPos - this.lagLen + this.lagRing.length) % this.lagRing.length;
+    for (let i = 0; i < this.lagLen && out.length < max; i++) {
+      out.push(this.lagRing[(start + i) % this.lagRing.length]);
+    }
+    return out;
+  }
+
 }
 
 export const globalIncrementalState = new IncrementalStateEngine();

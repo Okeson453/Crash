@@ -1,3 +1,4 @@
+-- Migration 024 (was duplicate 018_production_hardening)
 -- CrashWave V1.1 production hardening: durable webhooks, integer money, RLS, ledger cache.
 ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS amount_minor BIGINT;
 UPDATE payment_transactions SET amount_minor = ROUND(amount * 100)::BIGINT WHERE amount_minor IS NULL;
