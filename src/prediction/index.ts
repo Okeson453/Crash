@@ -26,3 +26,18 @@ export { CalibrationState, globalCalibrationState } from './calibration/calibrat
 export { EnsembleOrchestrator, globalEnsemble, DEFAULT_ENSEMBLE_FLAGS } from './ensemble/ensemble-orchestrator.js';
 export { prewarmPredictionStack, assertPredictionWarmForLive } from './prewarm.js';
 export { globalIncrementalFeatures } from './features/incremental-features.js';
+
+// Phases 4–8
+export { MetaLogisticModel, globalMetaModel } from './models/meta-logistic-model.js';
+export { MultiTargetEngine, globalMultiTargetEngine, MULTI_TARGETS } from './multi-target/multi-target-engine.js';
+export { OpportunityRanker, globalOpportunityRanker } from './opportunity/opportunity-ranker.js';
+export { computeOpportunityScore } from './opportunity/opportunity-score.js';
+export { computeDynamicThreshold } from './strategy/dynamic-threshold.js';
+export { fractionalKellyStake } from './stake/kelly-sizer.js';
+export { LiveDivergenceMonitor, globalLiveDivergence } from './validation/live-divergence-monitor.js';
+export { FeatureDriftMonitor, globalFeatureDrift } from './drift/feature-drift.js';
+export { PredictionDriftMonitor, globalPredictionDrift } from './drift/prediction-drift.js';
+export { ConceptDriftMonitor, globalConceptDrift } from './drift/concept-drift.js';
+export { ModelLifecycleManager, globalModelLifecycle } from './lifecycle/model-lifecycle.js';
+export { ProductionController, globalProductionController } from './lifecycle/production-controller.js';
+export { runPredictionPipeline, feedbackPredictionPipeline } from './prediction-pipeline.js';
