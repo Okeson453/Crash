@@ -17,6 +17,8 @@ export interface GameAdapterOptions {
   enableDomAdapter?: boolean;
   enableWsAdapter?: boolean;
   enableApiAdapter?: boolean;
+  primarySource?: 'ws' | 'api' | 'dom';
+  enableApiAdapter?: boolean;
   pollIntervalMs?: number;
 }
 
@@ -440,8 +442,11 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
               try {
                 const data = JSON.parse(event.data);
                 // Dispatch a custom event that Playwright can listen to
+                const fn = (window as any).__crashwaveOnWs;
+                if (typeof fn === 'function') {
+                  try { fn(data); } catch (_) {}
+                }
                 window.dispatchEvent(
-                  (window as any).__crashwaveOnWs?.(data);
                   new CustomEvent('bc-game-ws-message', {
                     detail: { url: this.url, data, timestamp: Date.now() },
                   })

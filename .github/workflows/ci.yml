@@ -146,8 +146,12 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Run migrations
         run: node scripts/run-migrations.mjs || true
+      - name: Verify integration tests exist
+        run: |
+          count=$(find tests/integration -name '*.test.ts' -o -name '*.spec.ts' 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then echo "No integration tests found"; exit 1; fi
       - name: Integration tests
-        run: npx jest --testPathPattern=tests/integration --ci --runInBand --passWithNoTests
+        run: npx jest --testPathPattern=tests/integration --ci --runInBand 
 
   e2e-smoke:
     name: E2E smoke
@@ -187,7 +191,7 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npx jest --testPathPattern=tests/e2e --ci --runInBand --passWithNoTests
+      - run: npx jest --testPathPattern=tests/e2e --ci --runInBand 
 
   container-scan:
     name: Container scan (Trivy)
@@ -201,4 +205,4 @@ jobs:
           scan-type: fs
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: '0'
+          exit-code: '1'

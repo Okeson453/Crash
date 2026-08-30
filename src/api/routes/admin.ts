@@ -168,33 +168,65 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/admin/users
   fastify.get('/users', async (request, reply) => {
-    const query = paginationSchema.extend({
-      search: z.string().optional(),
-      status: z.string().optional(),
-    }).parse(request.query);
-    const tenantManager = getTenantManager();
-    let users = await tenantManager.listUsers({ limit: query.limit });
+    const query = paginationSchema
+      .extend({
+        search: z.string().optional(),
+        status: z.string().optional(),
+      })
+      .parse(request.query);
+
+    const pool = getPool();
+    const conditions: string[] = ['1=1'];
+    const values: unknown[] = [];
+    let pidx = 1;
+
     if (query.search) {
-      const s = query.search.toLowerCase();
-      users = users.filter(
-        (u) =>
-          (u.telegramUsername || '').toLowerCase().includes(s) ||
-          (u.firstName || '').toLowerCase().includes(s) ||
-          (u.lastName || '').toLowerCase().includes(s)
+      conditions.push(
+        `(LOWER(COALESCE(telegram_username,'')) LIKE $${pidx} OR LOWER(COALESCE(first_name,'')) LIKE $${pidx} OR LOWER(COALESCE(last_name,'')) LIKE $${pidx} OR LOWER(COALESCE(email,'')) LIKE $${pidx})`
       );
+      values.push(`%${query.search.toLowerCase()}%`);
+      pidx += 1;
     }
     if (query.status && query.status !== 'all') {
-      users = users.filter((u) => u.status === query.status);
+      conditions.push(`status = $${pidx}`);
+      values.push(query.status);
+      pidx += 1;
     }
+    values.push(query.limit ?? 50);
+    const result = await pool.query(
+      `SELECT id, telegram_id, telegram_username, first_name, last_name,
+              photo_url, email, status, role, plan_id, timezone, created_at, updated_at
+       FROM users
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY created_at DESC
+       LIMIT $${pidx}`,
+      values
+    );
+    const users = result.rows.map((row) => ({
+      id: String(row.id),
+      telegramId: BigInt(row.telegram_id),
+      telegramUsername: (row.telegram_username as string) ?? null,
+      firstName: String(row.first_name ?? ''),
+      lastName: (row.last_name as string) ?? null,
+      photoUrl: (row.photo_url as string) ?? null,
+      email: (row.email as string) ?? null,
+      status: row.status as string,
+      role: (row.role as string) ?? 'player',
+      planId: (row.plan_id as string) ?? null,
+      timezone: (row.timezone as string) ?? 'UTC',
+      createdAt: row.created_at as Date,
+      updatedAt: row.updated_at as Date,
+    }));
 
     reply.status(200).send({
       data: users.map(publicUser),
       pagination: {
-        cursor: users.length === query.limit ? users[users.length - 1]?.id : null,
+        cursor: users.length === query.limit ? users[users.length - 1]?.id ?? null : null,
         hasMore: users.length === query.limit,
       },
     });
   });
+
 
   // GET /api/v1/admin/audit
   fastify.get('/audit', async (request, reply) => {
@@ -302,34 +334,19 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  fastify.get('/billing/subscription', async (_request, reply) => {
-    reply.send({ data: null });
-  });
-
-  fastify.get('/billing/usage', async (_request, reply) => {
-    reply.send({
-      data: {
-        apiCalls: 0,
-        apiCallsLimit: 100000,
-        players: 0,
-        playersLimit: 1000,
-        rounds: 0,
-        roundsLimit: 100000,
-      },
+  for (const path of [
+    '/billing/subscription',
+    '/billing/usage',
+    '/billing/invoices',
+    '/compliance/self-exclusion',
+    '/compliance/kyc',
+  ] as const) {
+    fastify.get(path, async (_req, reply) => {
+      reply.status(501).send({
+        error: { code: 'NOT_IMPLEMENTED', message: `${path} is not implemented` },
+      });
     });
-  });
-
-  fastify.get('/billing/invoices', async (_request, reply) => {
-    reply.send({ data: [] });
-  });
-
-  fastify.get('/compliance/self-exclusion', async (_request, reply) => {
-    reply.send({ data: [] });
-  });
-
-  fastify.get('/compliance/kyc', async (_request, reply) => {
-    reply.send({ data: { verified: 0, pending: 0, rejected: 0, total: 0 } });
-  });
+  }
 
   fastify.get('/integrations/telegram', async (_request, reply) => {
     reply.send({
@@ -343,12 +360,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   fastify.get('/integrations/services', async (_request, reply) => {
-    reply.send({
-      data: [
-        { name: 'postgresql', status: 'connected', lastCheckedAt: new Date().toISOString() },
-        { name: 'redis', status: 'connected', lastCheckedAt: new Date().toISOString() },
-        { name: 'telegram', status: 'disconnected', lastCheckedAt: new Date().toISOString() },
-      ],
+    reply.status(501).send({
+      error: { code: 'NOT_IMPLEMENTED', message: '/integrations/services is not implemented' },
     });
   });
 
@@ -492,7 +505,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data: runtimeAdminSettings.tenant.limits });
   });
 
-  const configHistory: Array<{ id: string; description: string; actorName: string; createdAt: string }> = [];
+  // config history is persisted via config_versions (listConfigVersions)
 
   
   fastify.get('/activity', async (request, reply) => {
@@ -519,7 +532,8 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   
   fastify.get('/config/history', async (_request, reply) => {
-    reply.send({ data: configHistory.slice(-50).reverse() });
+    const data = await listConfigVersions('betting_config', 50);
+    reply.send({ data });
   });
 
   fastify.get('/compliance/rg', async (_request, reply) => {
@@ -665,7 +679,15 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Gate unfinished surfaces with 501 rather than fake data
-  for (const path of ['/billing/invoices', '/compliance/reports'] as const) {
+  for (const path of [
+    '/billing/subscription',
+    '/billing/usage',
+    '/billing/invoices',
+    '/compliance/self-exclusion',
+    '/compliance/kyc',
+    '/compliance/reports',
+    '/integrations/services',
+  ] as const) {
     fastify.all(path, async (_req, reply) => {
       reply.status(501).send({
         error: { code: 'NOT_IMPLEMENTED', message: `${path} is not implemented` },

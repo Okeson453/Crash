@@ -214,7 +214,8 @@ export function composeApplication(
   let notificationRouter: NotificationRouter | null = null;
   let dailyReportScheduler: DailyReportScheduler | null = null;
   const tokenValue = process.env.TELEGRAM_BOT_TOKEN;
-  if (tokenValue && !String(tokenValue).includes('REPLACE_ME')) {
+  const isValidBotToken = (tok: string) => /^[0-9]+:[A-Za-z0-9_-]{35,}$/.test(tok);
+  if (tokenValue && isValidBotToken(String(tokenValue))) {
     try {
       const tgConfig: TelegramBotConfig = {
         botToken: String(tokenValue),

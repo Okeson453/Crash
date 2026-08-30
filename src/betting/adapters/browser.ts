@@ -85,7 +85,22 @@ export class BrowserBetPlacementAdapter implements BetPlacementAdapter {
         state: 'detached',
         timeout: timeoutMs,
       });
-      return { success: true, multiplier: null, pnl: null };
+      // Read most recent result from history for settlement
+      const resultText = await this.page
+        .locator(
+          '.crash-history .history-item:first-child, .game-history .round-item:first-child, [data-testid="last-crash"]'
+        )
+        .textContent()
+        .catch(() => null);
+      let multiplier: number | null = null;
+      if (resultText) {
+        const match = resultText.match(/(?:x\s*)?(\d+\.?\d*)\s*(?:x|X)?/);
+        if (match) {
+          const val = parseFloat(match[1]);
+          if (val >= 1.0 && val < 100000) multiplier = val;
+        }
+      }
+      return { success: true, multiplier, pnl: null };
     } catch {
       return { success: false, multiplier: null, pnl: null, error: 'cashout timeout' };
     }

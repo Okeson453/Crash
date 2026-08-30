@@ -71,7 +71,7 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
 
   // Connection rate limit per IP + auth + revocation
   const connWindow = new Map<string, { n: number; reset: number }>();
-  const msgWindow = new WeakMap<object, { n: number; reset: number }>();
+  const msgWindow = new Map<string, { n: number; reset: number }>();
   const userSockets = new Map<string, number>();
   const MAX_CONN_PER_MIN = Number(process.env.WS_MAX_CONN_PER_MIN ?? 30);
   const MAX_MSG_PER_SEC = Number(process.env.WS_MAX_MSG_PER_SEC ?? 20);
@@ -148,6 +148,19 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
 
   io.on('connection', (socket: AuthenticatedSocket) => {
     getLogger().info({ component: 'MiniAppWebSocket', userId: socket.userId }, 'WS client connected');
+    socket.use((packet, next) => {
+      const now = Date.now();
+      const sid = socket.id;
+      let w = msgWindow.get(sid);
+      if (!w || now > w.reset) {
+        w = { n: 0, reset: now + 1000 };
+        msgWindow.set(sid, w);
+      }
+      w.n += 1;
+      if (w.n > MAX_MSG_PER_SEC) return next(new Error('Message rate limit exceeded'));
+      next();
+    });
+
 
     // Subscribe to user-specific channel
     if (socket.userId) {
@@ -195,6 +208,8 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
     });
 
     socket.on('disconnect', (reason) => {
+      try { msgWindow.delete(socket.id); } catch { /* */ }
+
       getLogger().info({ component: 'MiniAppWebSocket', userId: socket.userId, reason }, 'WS client disconnected');
     });
   });
