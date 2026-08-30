@@ -70,6 +70,15 @@ import { globalEnsemble } from '../prediction/ensemble/ensemble-orchestrator';
 import { TenantManager, TenantResolver, TenantRuntimeFactory } from '../platform';
 import { wireDryRunSignalBridge, onRoundCrashedForDryRun } from './dry-run-bridge';
 import { checkEntryLatencySlo } from '../observability/performance/entry-slo-guard';
+import {
+  workerJobsTotal,
+  workerJobDurationMs,
+  workerInflight,
+  workerLastSuccessUnix,
+  workerMissingTotal,
+} from '../observability/metrics/workers';
+import { enqueueDeadLetter } from '../workers/dead-letter';
+import { feedbackPredictionPipeline } from '../prediction/prediction-pipeline';
 
 export interface CompositionContext {
   config: AppConfig;
@@ -461,10 +470,33 @@ export function composeApplication(
       const CRITICAL_WORKERS = new Set(['prediction-1', 'execution-1', 'settlement-1']);
       const dispatchHot = (name: string, payload: Record<string, unknown>, event: { id?: string; correlationId?: string }) => {
         const worker = ctx.workerFleet.get(name);
-        if (!worker) return;
-        void worker.process(payload, workerContext(event)).catch((err) =>
-          logger.error({ component: 'WorkerPipeline', worker: name, error: String(err) }, 'Worker job failed')
-        );
+        if (!worker) {
+          workerMissingTotal.inc({ worker: name });
+          return;
+        }
+        const end = workerJobDurationMs.startTimer({ worker: name });
+        workerInflight.inc({ worker: name });
+        void worker
+          .process(payload, workerContext(event))
+          .then(() => {
+            workerJobsTotal.inc({ worker: name, status: 'ok' });
+            workerLastSuccessUnix.set({ worker: name }, Date.now() / 1000);
+          })
+          .catch(async (err) => {
+            workerJobsTotal.inc({ worker: name, status: 'error' });
+            logger.error({ component: 'WorkerPipeline', worker: name, error: String(err) }, 'Worker job failed');
+            await enqueueDeadLetter({
+              worker: name,
+              payload,
+              error: String(err),
+              eventId: event.id,
+              at: new Date().toISOString(),
+            });
+          })
+          .finally(() => {
+            workerInflight.dec({ worker: name });
+            end();
+          });
       };
       // Bounded background queue for non-critical workers (concurrency 2)
       jobQueue.onProcess(async (job) => {
@@ -500,7 +532,7 @@ export function composeApplication(
         dispatchCold('discovery-1', payload, event, 'low');
       });
       onEvent('RoundCrashed', (payload, event) => {
-        // HOT: dry-run bridge + observe/learn on prediction path + sheath tick
+        // HOT: dry-run bridge → observeCrash → single feedbackPredictionPipeline path (no double-count)
         onRoundCrashedForDryRun({ payload, entryDecisionService, supervisor });
         dispatchHot('prediction-1', { ...payload, completedCrash: true, evaluate: false }, event);
         ctx.sheathMode.onRoundTick();

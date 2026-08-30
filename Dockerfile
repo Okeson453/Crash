@@ -53,3 +53,29 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
+
+# Slim API / control-plane image without Playwright browsers
+FROM node:20-bookworm-slim AS api-production
+WORKDIR /app
+ENV NODE_ENV=production \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PROCESS_ROLE=control-plane \
+    PORT=8081 \
+    METRICS_PORT=9090
+RUN groupadd -r crashapp && useradd -r -g crashapp -m -d /home/crashapp crashapp
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./
+COPY --from=build /app/config.yaml ./
+COPY migrations/ ./migrations/
+COPY scripts/run-migrations.mjs scripts/docker-entrypoint.sh \
+     scripts/healthcheck.sh scripts/wait-for-services.sh ./scripts/
+RUN chmod +x ./scripts/*.sh ./scripts/run-migrations.mjs \
+ && mkdir -p logs \
+ && chown -R crashapp:crashapp /app
+USER crashapp
+EXPOSE 8081 9090
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD curl -sf "http://127.0.0.1:${PORT:-8081}/api/v1/health" || exit 1
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
+CMD ["node", "dist/index.js"]

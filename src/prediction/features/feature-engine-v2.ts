@@ -9,7 +9,7 @@ import {
   IncrementalStateEngine,
   globalIncrementalState,
 } from '../state/incremental-state-engine.js';
-import { FEATURE_VERSION_V2 } from './feature-meta.js';
+import { FEATURE_VERSION_V2, CURRENT_FEATURE_VERSION } from './feature-meta.js';
 import { computeLagFeatures } from './lag-features.js';
 import { computeRunFeatures } from './run-features.js';
 import { computeMarkovFeatures } from './markov-features.js';
@@ -81,7 +81,7 @@ export class FeatureEngineV2 {
     return {
       roundId: targetRoundId,
       timestamp,
-      featureVersion: 'fv-1.0.0',
+      featureVersion: CURRENT_FEATURE_VERSION,
       values,
       meta: {
         sampleSize: priorRounds.length,

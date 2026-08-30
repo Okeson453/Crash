@@ -22,7 +22,7 @@ import { globalFeatureDrift } from './drift/feature-drift.js';
 import { globalPredictionDrift } from './drift/prediction-drift.js';
 import { globalConceptDrift } from './drift/concept-drift.js';
 import { scoreCandidates } from './models/candidate-models.js';
-import { FEATURE_VERSION_V2 } from './features/feature-meta.js';
+import { FEATURE_VERSION_V2, CURRENT_FEATURE_VERSION } from './features/feature-meta.js';
 import { globalLearnedRegimes } from './regimes/learned-clustering.js';
 import { globalLookaheadEngine } from './lookahead/lookahead-engine.js';
 import { globalOpportunityWindow } from './opportunity/opportunity-window.js';
@@ -232,7 +232,13 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
     confidence: selected.confidence,
     regime: learnedRegimeLabel,
     modelVersion: input.modelVersion ?? 'pipeline-v1',
-    featureVersion: input.featureVersion ?? FEATURE_VERSION_V2,
+    featureVersion: (() => {
+      const fv = input.featureVersion ?? CURRENT_FEATURE_VERSION;
+      if (fv !== CURRENT_FEATURE_VERSION && fv !== FEATURE_VERSION_V2) {
+        throw new Error(`Feature version mismatch: got ${fv}, need ${CURRENT_FEATURE_VERSION}`);
+      }
+      return CURRENT_FEATURE_VERSION;
+    })(),
     inputs: {
       calibratedEdge: Math.max(0, selected.calibratedProbability - threshold),
       confidence: selected.confidence,

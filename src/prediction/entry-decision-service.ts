@@ -139,6 +139,10 @@ export class EntryDecisionService {
     return this.acie;
   }
 
+  getLastEmittedProbability(): number | null {
+    return this.lastEmittedProbability;
+  }
+
   getStateSnapshot(): PredictionStateSnapshot {
     return this.stateRegistry.snapshot();
   }

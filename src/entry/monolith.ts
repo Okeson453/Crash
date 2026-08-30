@@ -7,7 +7,7 @@ import { register } from 'prom-client';
 import { bootConfig, bootPersistence, roleLabel } from './shared-boot.js';
 import { composeApplication, setGlobalComposition } from '../app/composition.js';
 import { createApiServer } from '../api/server.js';
-import { createWebSocketServer } from '../api/websocket/server.js';
+import { createWebSocketServer, closeWebSocketServer } from '../api/websocket/server.js';
 import { getLogger } from '../observability/logger.js';
 import { miniGameService } from '../mini-app/game-service.js';
 
@@ -55,6 +55,10 @@ export async function main(): Promise<void> {
   }
 
   const shutdown = async () => {
+    try {
+      await closeWebSocketServer(10_000);
+    } catch { /* */ }
+
     logger.info({ role }, 'Shutting down monolith');
     try {
       miniGameService.stop();

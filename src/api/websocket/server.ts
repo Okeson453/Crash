@@ -259,3 +259,22 @@ export function broadcastGameEvent(name: string, payload: Record<string, unknown
     io.to(`game:${tenantId}`).emit(name, payload);
   }
 }
+
+/** Graceful WS shutdown — stop accepting, drain, disconnect */
+export async function closeWebSocketServer(timeoutMs = 10_000): Promise<void> {
+  if (!io) return;
+  const server = io;
+  io = null;
+  await new Promise<void>((resolve) => {
+    const t = setTimeout(() => {
+      try {
+        server.disconnectSockets(true);
+      } catch { /* */ }
+      resolve();
+    }, timeoutMs);
+    server.close(() => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
