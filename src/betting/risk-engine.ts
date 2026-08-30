@@ -200,6 +200,7 @@ export class RiskEngine {
  */
 let globalRiskEngine: RiskEngine | null = null;
 
+/** @deprecated Prefer `new RiskEngine()` injected from composition */
 export function getRiskEngine(): RiskEngine {
   if (!globalRiskEngine) {
     globalRiskEngine = new RiskEngine();

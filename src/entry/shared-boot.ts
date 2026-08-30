@@ -27,7 +27,9 @@ export function bootPersistence(config: AppConfig, opts?: { requireRedis?: boole
   const role = resolveProcessRole(config);
   const requireRedis =
     opts?.requireRedis ??
-    (process.env.NODE_ENV === 'production' && role === 'control-plane');
+    (process.env.NODE_ENV === 'production' &&
+      (role === 'control-plane' || role === 'all'));
+  // Production always needs Redis for token revocation / rate limits
 
   if (redisUrl) {
     createRedisClient({ url: redisUrl });

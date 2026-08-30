@@ -34,7 +34,7 @@ import {
   listReferralsByStatus,
   listRewardLedger,
 } from '@/platform/referrals/admin-referral-service';
-import { loadAdminSetting, saveAdminSetting } from '@/platform/admin-settings-store';
+import { loadAdminSetting, saveAdminSetting, saveConfigVersion, listConfigVersions } from '@/platform/admin-settings-store';
 import { revokeReward } from '@/platform/referrals/reward-service';
 import {
   listBrowserSessions,
@@ -155,6 +155,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     const current = await loadAdminSetting('betting_config', defaultBettingConfig);
     const next = { ...current, ...body };
     await saveAdminSetting('betting_config', next, request.auth?.userId);
+    await saveConfigVersion('betting_config', next, request.auth?.userId);
     reply.status(200).send({ data: next });
   });
 

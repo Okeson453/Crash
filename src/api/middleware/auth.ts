@@ -41,7 +41,22 @@ export async function authenticateRequest(
   const token = authHeader.slice(7);
 
   try {
-    try { if (await getRedisClient().get(`miniapp:revoked:${createHash('sha256').update(token).digest('hex')}`)) { reply.status(401).send({ error: { code: 'AUTH_TOKEN_REVOKED', message: 'Session has been revoked' } }); return; } } catch { /* Redis may be unavailable in development. */ }
+    try {
+      const revoked = await getRedisClient().get(
+        `miniapp:revoked:${createHash('sha256').update(token).digest('hex')}`
+      );
+      if (revoked) {
+        reply.status(401).send({ error: { code: 'AUTH_TOKEN_REVOKED', message: 'Session has been revoked' } });
+        return;
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV === 'production') {
+        reply.status(503).send({
+          error: { code: 'AUTH_STORE_UNAVAILABLE', message: 'Session store unavailable' },
+        });
+        return;
+      }
+    }
     // For HS256, we use TextEncoder on the secret
     const secret = new TextEncoder().encode(JWT_SECRET);
     const { payload } = await jwtVerify(token, secret, {

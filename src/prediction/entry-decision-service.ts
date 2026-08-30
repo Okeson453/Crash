@@ -396,6 +396,7 @@ export class EntryDecisionService {
         // Honest prediction quality labels (P1)
         (signal as Record<string, unknown>).modelFamily = 'acie-heuristic-ensemble';
         (signal as Record<string, unknown>).heuristic = true;
+        (signal as Record<string, unknown>).trainable = false;
         (signal as Record<string, unknown>).modelScope = 'global';
         (signal as Record<string, unknown>).modelVersion = 'acie-v3';
         try {

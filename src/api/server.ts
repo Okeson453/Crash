@@ -57,7 +57,13 @@ export async function createApiServer(): Promise<FastifyInstance> {
       },
       hsts: process.env.NODE_ENV === 'production',
     });
-  } catch { /* optional */ }
+  } catch (err) {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_NO_HELMET !== 'true') {
+      throw new Error(
+        `@fastify/helmet required in production: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
 
   // CORS — production requires explicit allow-list
   {

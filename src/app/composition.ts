@@ -35,7 +35,8 @@ import { PredictionProvenanceRepository } from '../persistence/repositories/pred
 import { PredictionEngine } from '../prediction/prediction-engine';
 import { HistoricalDataService } from '../prediction/historical-data-service';
 import { PredictionRepository } from '../persistence/repositories/prediction-repo';
-import { RiskEngine, getRiskEngine } from '../betting/risk-engine';
+import { RiskEngine } from '../betting/risk-engine';
+import { getPredictionRuntime } from '../prediction/runtime/prediction-runtime';
 import { BettingCoordinator } from '../betting/betting-coordinator';
 import { RiskStateProvider } from '../betting/risk-state-provider';
 import { DailyEntryLedger, DailyEntryCounter } from '../ledger/daily-entries';
@@ -192,7 +193,7 @@ export function composeApplication(
 
   const balanceTracker = new BalanceTracker();
   const unknownRecovery = new UnknownStateRecovery(betRepo, roundRepo, eventBus);
-  const balanceReconciliation = new BalanceReconciliation(betRepo, balanceTracker, eventBus);
+  const balanceReconciliation = new BalanceReconciliation(betRepo, balanceTracker, eventBus, undefined, getPool());
   const recoveryManager = new RecoveryManager(unknownRecovery, balanceReconciliation, betRepo, eventBus);
 
   let redis: ReturnType<typeof getRedisClient> | null = null;
@@ -230,7 +231,10 @@ export function composeApplication(
     }
   }
 
-  const riskEngine = getRiskEngine();
+  const riskEngine = new RiskEngine();
+  const platformRuntime = getPredictionRuntime('platform');
+  // Snapshot key: crash:prediction:stack:v2:platform (see prediction-runtime.ts)
+
   const predictionEngine = new PredictionEngine();
   const historicalDataService = new HistoricalDataService(roundRepo);
   let predictionRepo: PredictionRepository | undefined;

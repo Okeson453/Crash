@@ -58,6 +58,7 @@ const DEFAULT_CONFIG: BalanceReconciliationConfig = {
 export class BalanceReconciliation {
   private readonly logger = getLogger();
   private readonly config: BalanceReconciliationConfig;
+  private readonly injectedPool: { query: (q: string, a?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
   private lastResult: ReconciliationResult | null = null;
   private consecutiveMismatches = 0;
   private maxConsecutiveMismatches = 3;
@@ -167,17 +168,27 @@ export class BalanceReconciliation {
   async computeExpectedBalance(): Promise<number> {
     try {
       // Prefer SQL aggregates — never silently cap at 1000 rows
-      const pool = (this.betRepo as unknown as { pool?: { query: (q: string, a?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } }).pool;
+      const pool = this.injectedPool ?? (this.betRepo as unknown as { pool?: { query: (q: string, a?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } }).pool;
       if (pool?.query) {
         const agg = await pool.query(
-          `SELECT
-             COALESCE(SUM(pnl), 0)::float8 AS total_pnl,
-             (SELECT balance_before FROM bets
+          `WITH snap AS (
+             SELECT balance, captured_at FROM balance_snapshots
+             ORDER BY captured_at DESC LIMIT 1
+           )
+           SELECT
+             COALESCE((SELECT balance FROM snap), (
+               SELECT balance_before FROM bets
+               WHERE balance_before IS NOT NULL
+               ORDER BY created_at DESC LIMIT 1
+             ))::float8 AS baseline,
+             COALESCE((
+               SELECT SUM(pnl) FROM bets
                WHERE state IN ('CASHED_OUT','LOST','FAILED','RECONCILED')
-                 AND balance_before IS NOT NULL
-               ORDER BY created_at ASC LIMIT 1)::float8 AS baseline
-           FROM bets
-           WHERE state IN ('CASHED_OUT','LOST','FAILED','RECONCILED')`
+                 AND (
+                   NOT EXISTS (SELECT 1 FROM snap)
+                   OR created_at > (SELECT captured_at FROM snap)
+                 )
+             ), 0)::float8 AS total_pnl`
         );
         const row = agg.rows[0] ?? {};
         const totalPnL = Number(row.total_pnl ?? 0);

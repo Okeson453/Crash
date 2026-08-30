@@ -10,6 +10,24 @@ import { tryQualifyReferral } from './referrals/qualification-service.js';
 export class TenantManager {
   private readonly logger = getLogger();
 
+  /** Ensure user has org tenant_id (not equal to user id) */
+  async ensureOrgTenant(userId: string): Promise<string> {
+    const pool = getPool();
+    const existing = await pool.query(`SELECT tenant_id FROM users WHERE id = $1`, [userId]);
+    const tid = existing.rows[0]?.tenant_id as string | null;
+    if (tid) return tid;
+    const ins = await pool.query(
+      `INSERT INTO tenants (name) VALUES ($1) RETURNING id`,
+      [`personal-${userId}`]
+    );
+    const tenantId = String(ins.rows[0].id);
+    await pool.query(`UPDATE users SET tenant_id = $1, updated_at = NOW() WHERE id = $2`, [
+      tenantId,
+      userId,
+    ]);
+    return tenantId;
+  }
+
   async createUser(params: {
     telegramId: bigint | number;
     telegramUsername?: string;
@@ -37,7 +55,14 @@ export class TenantManager {
     );
     const row = result.rows[0];
     this.logger.info({ component: 'TenantManager', userId: row.id }, 'User created');
-    return this.rowToTenant(row);
+    const tenant = this.rowToTenant(row);
+    try {
+      const tid = await this.ensureOrgTenant(tenant.id);
+      tenant.tenantId = tid;
+    } catch (e) {
+      this.logger.warn({ error: String(e) }, 'ensureOrgTenant failed on create');
+    }
+    return tenant;
   }
 
   async getUserByTelegramId(telegramId: bigint | number): Promise<Tenant | null> {
@@ -295,6 +320,7 @@ export class TenantManager {
       status: row.status as Tenant['status'],
       role: (row.role as Tenant['role']) ?? 'player',
       planId: (row.plan_id as string) ?? null,
+      tenantId: (row.tenant_id as string) ?? null,
       timezone: (row.timezone as string) ?? 'UTC',
       createdAt: row.created_at as Date,
       updatedAt: row.updated_at as Date,

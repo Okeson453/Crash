@@ -50,7 +50,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       user = await tenantManager.createUser({ telegramId: initData.user.id, telegramUsername: initData.user.username, firstName: initData.user.first_name, lastName: initData.user.last_name, photoUrl: initData.user.photo_url, role: 'player' });
     }
     await tenantManager.updateUserLastSeen(user.id);
-    const tokens = await createTokens({ id: user.id, telegramId: user.telegramId.toString(), role: user.role, tenantId: user.id, planId: user.planId });
+    try {
+      const tid = await tenantManager.ensureOrgTenant(user.id);
+      user = { ...user, tenantId: tid };
+    } catch { /* */ }
+    const tokens = await createTokens({ id: user.id, telegramId: user.telegramId.toString(), role: user.role, tenantId: user.tenantId ?? null, planId: user.planId });
     reply.status(200).send({ data: { user: publicUser(user), tokens, isNewUser } });
   });
 
@@ -65,16 +69,31 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       await getPool().query('UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE token_hash=$1', [tokenHash]);
       const user = await getTenantManager().findUserById(payload.userId);
       if (!user) { reply.status(401).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } }); return; }
-      reply.status(200).send({ data: await createTokens({ id: user.id, telegramId: user.telegramId.toString(), role: user.role, tenantId: user.id, planId: user.planId }) });
+      reply.status(200).send({ data: await createTokens({ id: user.id, telegramId: user.telegramId.toString(), role: user.role, tenantId: user.tenantId ?? null, planId: user.planId }) });
     } catch { reply.status(401).send({ error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid or expired refresh token' } }); }
   });
 
   fastify.post('/logout', { preHandler: authenticateRequest }, async (request, reply) => {
     const token = bearerToken(request);
     if (token) {
-      try { await getRedisClient().set(`miniapp:revoked:${hashToken(token)}`, '1', 'EX', 15 * 60); } catch { /* Redis is optional for development. */ }
+      try {
+        await getRedisClient().set(`miniapp:revoked:${hashToken(token)}`, '1', 'EX', 15 * 60);
+      } catch (err) {
+        if (process.env.NODE_ENV === 'production') {
+          reply.status(503).send({
+            error: {
+              code: 'AUTH_STORE_UNAVAILABLE',
+              message: 'Could not revoke session; try again',
+            },
+          });
+          return;
+        }
+      }
     }
-    await getPool().query('UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL', [request.auth.userId]);
+    await getPool().query(
+      'UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL',
+      [request.auth.userId]
+    );
     reply.status(204).send();
   });
 

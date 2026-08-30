@@ -68,9 +68,37 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
     }
   })();
 
+  // Connection rate limit per IP + auth + revocation
+  const connWindow = new Map<string, { n: number; reset: number }>();
+  const msgWindow = new WeakMap<object, { n: number; reset: number }>();
+  const userSockets = new Map<string, number>();
+  const MAX_CONN_PER_MIN = Number(process.env.WS_MAX_CONN_PER_MIN ?? 30);
+  const MAX_MSG_PER_SEC = Number(process.env.WS_MAX_MSG_PER_SEC ?? 20);
+  const MAX_SOCKETS_PER_USER = Number(process.env.WS_MAX_SOCKETS_PER_USER ?? 5);
+
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
+      const ip = String(socket.handshake.address || 'unknown');
+      const now = Date.now();
+      let c = connWindow.get(ip);
+      if (!c || now > c.reset) {
+        c = { n: 0, reset: now + 60_000 };
+        connWindow.set(ip, c);
+      }
+      c.n += 1;
+      if (c.n > MAX_CONN_PER_MIN) {
+        return next(new Error('Connection rate limit exceeded'));
+      }
+      try {
+        const { getRedisClient } = await import('../../persistence/redis-client.js');
+        const redis = getRedisClient();
+        const key = `ws:conn:${ip}`;
+        const n = await redis.incr(key);
+        if (n === 1) await redis.expire(key, 60);
+        if (n > MAX_CONN_PER_MIN) return next(new Error('Connection rate limit exceeded'));
+      } catch { /* in-memory fallback above */ }
+
       const token = socket.handshake.auth.token as string;
       if (!token) {
         return next(new Error('Authentication required'));
@@ -84,6 +112,32 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
       socket.userId = payload.sub;
       socket.tenantId = payload.tenantId ? String(payload.tenantId) : null;
       socket.role = payload.role as string;
+
+      // Token revocation check
+      try {
+        const { createHash } = await import('node:crypto');
+        const { getRedisClient } = await import('../../persistence/redis-client.js');
+        const hash = createHash('sha256').update(token).digest('hex');
+        if (await getRedisClient().get(`miniapp:revoked:${hash}`)) {
+          return next(new Error('Session revoked'));
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV === 'production') {
+          return next(new Error('Auth store unavailable'));
+        }
+      }
+
+      const uid = String(payload.sub);
+      const cur = userSockets.get(uid) ?? 0;
+      if (cur >= MAX_SOCKETS_PER_USER) {
+        return next(new Error('Too many concurrent sockets'));
+      }
+      userSockets.set(uid, cur + 1);
+      socket.on('disconnect', () => {
+        const n = (userSockets.get(uid) ?? 1) - 1;
+        if (n <= 0) userSockets.delete(uid);
+        else userSockets.set(uid, n);
+      });
 
       next();
     } catch {

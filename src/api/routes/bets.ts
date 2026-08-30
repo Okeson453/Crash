@@ -1,15 +1,114 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticateRequest } from '@/api/middleware/auth';
-import { getPool } from '@/persistence/client';
 import { miniGameService } from '@/mini-app/game-service';
+import { getPool } from '@/persistence/client';
 import { paginationSchema } from '@/api/validators/common';
-const placeBetSchema=z.object({amount:z.number().positive().max(1000000),autoCashout:z.number().min(1.01).max(10000).nullable().optional()});
-const idempotencySchema=z.string().uuid();
-function rowToBet(row:Record<string,unknown>){return{id:String(row.id),roundId:row.round_id?String(row.round_id):null,amount:Number(row.amount),autoCashout:row.auto_cashout===null?null:Number(row.auto_cashout),state:String(row.state),cashoutMultiplier:row.cashout_multiplier===null?null:Number(row.cashout_multiplier),pnl:row.pnl===null?null:Number(row.pnl),createdAt:new Date(row.created_at as string|number|Date).toISOString(),settledAt:row.settled_at?new Date(row.settled_at as string|number|Date).toISOString():null};}
-export async function betsRoutes(fastify:FastifyInstance):Promise<void>{
-  fastify.post('/',{preHandler:authenticateRequest,config:{rateLimit:{max:10,timeWindow:'1 second'}}},async(request,reply)=>{const body=placeBetSchema.parse(request.body);const header=request.headers['x-idempotency-key'];const parsed=idempotencySchema.safeParse(header);if(!parsed.success){reply.status(422).send({error:{code:'INVALID_IDEMPOTENCY_KEY',message:'X-Idempotency-Key must be a UUID'}});return;}try{const bet=await miniGameService.placeBet(request.auth.userId,body.amount,body.autoCashout??null,parsed.data);reply.status(201).send({data:bet});}catch(error){const message=error instanceof Error?error.message:'Bet could not be placed';if(message==='RISK_LIMIT_REACHED'){reply.status(422).send({error:{code:'RISK_LIMIT_REACHED',message:'Your configured loss limit has been reached'}});return;}if(message==='INSUFFICIENT_BALANCE'){reply.status(422).send({error:{code:'INSUFFICIENT_BALANCE',message:'Insufficient balance'}});return;}reply.status(409).send({error:{code:'BET_NOT_ACCEPTED',message}});}});
-  fastify.post('/:id/cashout',{preHandler:authenticateRequest},async(request,reply)=>{const params=z.object({id:z.string().uuid()}).parse(request.params);try{reply.send({data:await miniGameService.cashout(request.auth.userId,params.id)});}catch(error){reply.status(409).send({error:{code:'BET_CASHOUT_FAILED',message:error instanceof Error?error.message:'Cashout failed'}});}});
-  fastify.get('/',{preHandler:authenticateRequest},async(request,reply)=>{const query=paginationSchema.parse(request.query);const statusValue=typeof request.query==='object'&&request.query!==null&&'status' in request.query?request.query.status:undefined;const params:unknown[]=[request.auth.userId];const filters=['user_id=$1'];if(typeof statusValue==='string'&&statusValue){params.push(statusValue.toLowerCase());filters.push(`state=$${params.length}`);}const fromDate=typeof request.query==='object'&&request.query!==null&&'fromDate' in request.query?request.query.fromDate:undefined;if(typeof fromDate==='string'&&fromDate){params.push(fromDate);filters.push(`created_at >= $${params.length}`);}const toDate=typeof request.query==='object'&&request.query!==null&&'toDate' in request.query?request.query.toDate:undefined;if(typeof toDate==='string'&&toDate){params.push(toDate);filters.push(`created_at <= $${params.length}`);}params.push(query.limit);const result=await getPool().query(`SELECT * FROM mini_app_bets WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length}`,params);const data=result.rows.map(rowToBet);reply.send({data,pagination:{cursor:data.length===query.limit?data[data.length-1]?.id??null:null,hasMore:data.length===query.limit}});});
-  fastify.get('/:id',{preHandler:authenticateRequest},async(request,reply)=>{const params=z.object({id:z.string().uuid()}).parse(request.params);const result=await getPool().query('SELECT * FROM mini_app_bets WHERE id=$1 AND user_id=$2',[params.id,request.auth.userId]);if(!result.rows[0]){reply.status(404).send({error:{code:'BET_NOT_FOUND',message:'Bet not found'}});return;}reply.send({data:rowToBet(result.rows[0])});});
+
+const listQuerySchema = paginationSchema.extend({
+  status: z
+    .enum(['pending', 'placed', 'active', 'cashed_out', 'lost', 'cancelled', 'failed'])
+    .optional(),
+  fromDate: z.string().datetime().optional(),
+  toDate: z.string().datetime().optional(),
+});
+
+function rowToBet(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    roundId: row.round_id ? String(row.round_id) : null,
+    amount: Number(row.amount),
+    autoCashout: row.auto_cashout != null ? Number(row.auto_cashout) : null,
+    state: String(row.state),
+    cashoutMultiplier: row.cashout_multiplier != null ? Number(row.cashout_multiplier) : null,
+    pnl: row.pnl != null ? Number(row.pnl) : null,
+    createdAt: new Date(row.created_at as string).toISOString(),
+    settledAt: row.settled_at ? new Date(row.settled_at as string).toISOString() : null,
+  };
+}
+
+export async function betsRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.post('/', { preHandler: authenticateRequest }, async (request, reply) => {
+    const body = z
+      .object({
+        amount: z.number().positive(),
+        autoCashout: z.number().positive().nullable().optional(),
+        idempotencyKey: z.string().min(1).max(128),
+      })
+      .parse(request.body);
+    try {
+      const bet = await miniGameService.placeBet(
+        request.auth.userId,
+        body.amount,
+        body.autoCashout ?? null,
+        body.idempotencyKey
+      );
+      reply.send({ data: bet });
+    } catch (error) {
+      reply.status(409).send({
+        error: {
+          code: 'BET_PLACE_FAILED',
+          message: error instanceof Error ? error.message : 'Place bet failed',
+        },
+      });
+    }
+  });
+
+  fastify.post('/:id/cashout', { preHandler: authenticateRequest }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    try {
+      reply.send({ data: await miniGameService.cashout(request.auth.userId, params.id) });
+    } catch (error) {
+      reply.status(409).send({
+        error: {
+          code: 'BET_CASHOUT_FAILED',
+          message: error instanceof Error ? error.message : 'Cashout failed',
+        },
+      });
+    }
+  });
+
+  fastify.get('/', { preHandler: authenticateRequest }, async (request, reply) => {
+    const query = listQuerySchema.parse(request.query);
+    const params: unknown[] = [request.auth.userId];
+    const filters = ['user_id=$1'];
+    if (query.status) {
+      params.push(query.status);
+      filters.push(`state=$${params.length}`);
+    }
+    if (query.fromDate) {
+      params.push(query.fromDate);
+      filters.push(`created_at >= $${params.length}`);
+    }
+    if (query.toDate) {
+      params.push(query.toDate);
+      filters.push(`created_at <= $${params.length}`);
+    }
+    params.push(query.limit);
+    const result = await getPool().query(
+      `SELECT * FROM mini_app_bets WHERE ${filters.join(' AND ')} ORDER BY created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    const data = result.rows.map(rowToBet);
+    reply.send({
+      data,
+      pagination: {
+        cursor: data.length === query.limit ? data[data.length - 1]?.id ?? null : null,
+        hasMore: data.length === query.limit,
+      },
+    });
+  });
+
+  fastify.get('/:id', { preHandler: authenticateRequest }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const result = await getPool().query(
+      'SELECT * FROM mini_app_bets WHERE id=$1 AND user_id=$2',
+      [params.id, request.auth.userId]
+    );
+    if (!result.rows[0]) {
+      reply.status(404).send({ error: { code: 'BET_NOT_FOUND', message: 'Bet not found' } });
+      return;
+    }
+    reply.send({ data: rowToBet(result.rows[0]) });
+  });
 }

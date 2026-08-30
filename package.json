@@ -74,7 +74,8 @@
     "telegraf": "^4.16.3",
     "ws": "^8.21.3",
     "zod": "^3.23.8",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@fastify/helmet": "^11.1.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
