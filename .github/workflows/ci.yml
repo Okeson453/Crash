@@ -41,7 +41,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
-      - run: npx jest --testPathPattern=tests/unit --passWithNoTests --ci
+      - run: npx jest --testPathPattern=tests/unit --ci
       - run: npm run build
 
   mini-app:
@@ -76,5 +76,32 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --no-audit --no-fund
-      - run: npx jest --testPathPattern=tests/unit/(security|referrals) --ci --passWithNoTests
+      - run: npx jest --testPathPattern=tests/unit/(security|referrals) --ci
       - run: npm audit --audit-level=high
+
+  composition-gate:
+    name: Composition change gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect composition.ts changes
+        id: diff
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q 'src/app/composition.ts'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.diff.outputs.changed == 'true'
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+        if: steps.diff.outputs.changed == 'true'
+      - name: Full unit suite required when composition changes
+        if: steps.diff.outputs.changed == 'true'
+        run: npx jest --testPathPattern=tests/unit --ci --runInBand

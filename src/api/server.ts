@@ -16,9 +16,11 @@ import { betsRoutes } from './routes/bets';
 import { usersRoutes } from './routes/users';
 import { adminRoutes } from './routes/admin';
 import { analyticsRoutes } from './routes/analytics';
+import { responsibleGamblingRoutes } from './routes/responsible-gambling';
 import { healthRoutes } from './routes/health';
 import { plansRoutes } from './routes/plans';
 import { referralsRoutes } from './routes/referrals';
+import { metricsRegistry } from '../observability/metrics/registry';
 
 export async function createApiServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -29,9 +31,20 @@ export async function createApiServer(): Promise<FastifyInstance> {
   // Error handler
   fastify.setErrorHandler(errorHandler);
 
-  // Security headers
+  // Always apply baseline headers even if @fastify/helmet is absent
+  fastify.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    reply.header('Referrer-Policy', 'no-referrer');
+    if (process.env.NODE_ENV === 'production') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    return payload;
+  });
+
+  // Security headers (helmet when available)
   try {
-    // @ts-expect-error optional dependency
+    // optional dependency may be present
     const helmetMod = await import('@fastify/helmet');
     const helmet = helmetMod.default ?? helmetMod;
     await fastify.register(helmet as never, {
@@ -109,9 +122,9 @@ export async function createApiServer(): Promise<FastifyInstance> {
 
   // OpenAPI (optional — skip if package missing)
   try {
-    // @ts-expect-error optional dependency
+    // optional dependency may be present
     const swaggerMod = await import('@fastify/swagger');
-    // @ts-expect-error optional dependency
+    // optional dependency may be present
     const swaggerUiMod = await import('@fastify/swagger-ui');
     const swagger = swaggerMod.default ?? swaggerMod;
     const swaggerUi = swaggerUiMod.default ?? swaggerUiMod;
@@ -147,6 +160,13 @@ export async function createApiServer(): Promise<FastifyInstance> {
   await fastify.register(referralsRoutes, { prefix: '/api/v1/referrals' });
   await fastify.register(analyticsRoutes, { prefix: '/api/v1/analytics' });
   await fastify.register(plansRoutes, { prefix: '/api/v1/plans' });
+  await fastify.register(responsibleGamblingRoutes, { prefix: '/api/v1/rg' });
+
+  // Prometheus metrics (Phase 5.8)
+  fastify.get('/metrics', async (_request, reply) => {
+    reply.header('Content-Type', metricsRegistry.contentType);
+    reply.send(await metricsRegistry.metrics());
+  });
 
   return fastify;
 }

@@ -6,7 +6,7 @@ CrashWave is an end-to-end platform combining a real-time crash-game engine, bac
 
 The repository contains the core platform services, player-facing Mini App, standalone administration dashboard, database migrations, Redis coordination, WebSocket infrastructure, Telegram integration, browser/game integration, risk and betting services, operational tooling, and deployment configuration.
 
-«Current status: The repository has undergone a production-readiness implementation and re-audit checkpoint. Major architecture, security, authentication, RBAC, game-state, betting, administration, observability, deployment, and testing foundations are present. Final production sign-off remains dependent on restoring dependency installation and executing the remaining live integration, E2E, load, Lighthouse, security, and compliance verification gates.»
+«Current status: The repository has undergone a production-readiness implementation and re-audit checkpoint. Major architecture, security, authentication, RBAC, game-state, betting, administration, observability, deployment, and testing foundations are present. Engineering remediation Phases 1–5 are implemented in-tree. Final production sign-off is tracked in `docs/PRODUCTION_SIGNOFF_CHECKLIST.md` and remains dependent on ops gates (live integration, E2E, load, Lighthouse, security, compliance) in the target environment.»
 
 ---
 

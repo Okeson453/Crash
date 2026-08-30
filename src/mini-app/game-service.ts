@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { getPool } from '@/persistence/client';
 import { consumeBonusEntries } from '@/platform/referrals/reward-service';
+import { assertBettingAllowed } from '@/platform/responsible-gambling';
 
 export type MiniGamePhase = 'idle' | 'waiting' | 'countdown' | 'running' | 'crashed';
 export interface MiniGameState { phase: MiniGamePhase; roundId: string | null; multiplier: number | null; countdownSeconds: number | null; startedAt: string | null; crashedAt: string | null; crashPoint: number | null; nextRoundAt: string | null; serverTime: string; serverSeedHash: string | null; clientSeed: string | null; nonce: number | null; /** Revealed only after crash */ serverSeed: string | null; }
@@ -35,6 +36,8 @@ export class MiniGameService {
   }
 
   async placeBet(userId:string, amount:number, autoCashout:number|null, idempotencyKey:string):Promise<MiniBet> {
+    const rg = assertBettingAllowed(userId);
+    if(!rg.allowed) throw new Error(`Responsible gambling block: ${rg.reason}`);
     if(this.phase!=='countdown'||!this.roundId) throw new Error('Betting is closed');
     const pool=getPool(); const client=await pool.connect();
     try { await client.query('BEGIN'); const existing=await client.query('SELECT * FROM mini_app_bets WHERE idempotency_key=$1 FOR UPDATE',[idempotencyKey]); if(existing.rows[0]){await client.query('COMMIT');return this.rowToBet(existing.rows[0]);}

@@ -24,6 +24,8 @@ import { AppConfig } from '../config/schema.js';
 import { DailyEntryLedger } from '../ledger/daily-entries.js';
 import { getDailyKey } from '../utils/day-boundary.js';
 import { checkTenantQuota, recordTenantEntry } from '../platform/tenant-quota.js';
+import { assertBrowserPolicyForLive, resolveBrowserProductMode } from '../browser/product-policy.js';
+import { globalBrowserWorkerHealth } from '../browser/worker/health-circuit.js';
 import { globalFinancialCircuitBreaker } from '../core/circuit-breaker/financial-circuit-breaker.js';
 import type { SheathMode } from '../core/sheath-mode/index.js';
 import type { DecisionEngine } from '../decision/decision-engine.js';
@@ -348,6 +350,21 @@ export class BettingCoordinator {
     if (mode === 'observe-only' || mode === 'maintenance') {
       this.logger.debug({ component: 'BettingCoordinator', mode }, 'No live placement in this mode');
       return;
+    }
+    if (mode === 'live') {
+      try {
+        assertBrowserPolicyForLive();
+        if (resolveBrowserProductMode() === 'remote' && globalBrowserWorkerHealth.isOpen()) {
+          this.logger.warn({ component: 'BettingCoordinator' }, 'Browser worker circuit open — skip live placement');
+          return;
+        }
+      } catch (err) {
+        this.logger.error(
+          { component: 'BettingCoordinator', error: String(err) },
+          'Browser product policy blocked live placement'
+        );
+        return;
+      }
     }
 
     // Advance through entry checks

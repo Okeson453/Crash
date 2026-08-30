@@ -1,0 +1,32 @@
+# Phase 5.8 — Prometheus SLO alerts (wire into Alertmanager)
+groups:
+  - name: crashwave-slo
+    rules:
+      - alert: EntryPathLatencyHigh
+        expr: histogram_quantile(0.99, sum(rate(crash_entry_path_latency_ms_bucket[5m])) by (le)) > 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Entry path p99 latency > 300ms
+      - alert: PredictionLatencyHigh
+        expr: histogram_quantile(0.99, sum(rate(crash_prediction_latency_ms_bucket[5m])) by (le)) > 8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prediction p99 latency > 8ms
+      - alert: BetPlacementFailures
+        expr: increase(crash_bet_placement_failure_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Elevated bet placement failures
+      - alert: BrowserWorkerDown
+        expr: crash_browser_process_up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Browser worker process gauge is down

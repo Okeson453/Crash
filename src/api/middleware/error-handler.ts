@@ -68,6 +68,7 @@ export function errorHandler(
     error: {
       code: error.code || 'INTERNAL_ERROR',
       message: statusCode >= 500 ? 'Internal server error' : error.message,
+      details: statusCode >= 500 ? undefined : (error as { details?: unknown }).details,
       requestId,
     },
   };

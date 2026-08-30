@@ -48,7 +48,7 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
       const redisUrl = process.env.REDIS_URL || process.env.SOCKET_REDIS_URL;
       if (!redisUrl || !io) return;
       // Dynamic import so package remains optional at build time
-      // @ts-expect-error optional dependency
+      // optional dependency may be present
       const adapterMod = await import('@socket.io/redis-adapter');
       const ioredis = await import('ioredis');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
