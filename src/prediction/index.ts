@@ -45,3 +45,11 @@ export { runPredictionPipeline, feedbackPredictionPipeline } from './prediction-
 export { LearningScheduler, globalLearningScheduler } from './learning/learning-scheduler.js';
 export type { PredictionGeneratedEvent } from './events/prediction-event.js';
 export { buildPredictionGeneratedEvent } from './events/prediction-event.js';
+
+export { runRandomnessGate, applyRandomnessGateToFlags } from './validation/randomness-gate.js';
+export { validateCalibration } from './validation/calibration-validator.js';
+export { evaluateModelGate } from './validation/model-gate.js';
+export { runValidationProtocol } from './validation/walk-forward-protocol.js';
+export { LearnedRegimeClustering, globalLearnedRegimes } from './regimes/learned-clustering.js';
+export { LookaheadEngine, globalLookaheadEngine } from './lookahead/lookahead-engine.js';
+export { OpportunityWindow, globalOpportunityWindow } from './opportunity/opportunity-window.js';

@@ -11,6 +11,10 @@ import { globalCalibrationState } from './calibration/calibration-state.js';
 import { featureHotCache } from '../observability/performance/hot-cache.js';
 import { globalFeatureEngineV2 } from './features/feature-engine-v2.js';
 import { globalModelLifecycle } from './lifecycle/model-lifecycle.js';
+import { runRandomnessGate, applyRandomnessGateToFlags } from './validation/randomness-gate.js';
+import { globalEnsemble } from './ensemble/ensemble-orchestrator.js';
+import { globalLookaheadEngine } from './lookahead/lookahead-engine.js';
+
 
 
 export interface PrewarmResult {
@@ -20,6 +24,7 @@ export interface PrewarmResult {
   stateWarm: boolean;
   calibrationWarm: boolean;
   durationMs: number;
+  sequenceModelsEnabled?: boolean;
 }
 
 export async function prewarmPredictionStack(
@@ -83,6 +88,38 @@ export async function prewarmPredictionStack(
       });
     }
   } catch { /* ignore */ }
+
+  // §4 randomness gate — only enable sequence models if structure replicates
+  try {
+    if (rounds.length >= 1000) {
+      const gate = runRandomnessGate(
+        rounds.map((r) => r.crashPoint),
+        { minRounds: Math.min(50_000, Math.max(1000, rounds.length)) }
+      );
+      const flags = applyRandomnessGateToFlags(
+        rounds.length >= 50_000
+          ? gate
+          : { ...gate, allowSequenceModels: false }
+      );
+      globalEnsemble.setFlags(flags);
+      // Lookahead stays off unless full 50k gate allows sequence models
+      globalLookaheadEngine.setEnabled(false);
+      logger.info(
+        {
+          component: 'Prewarm',
+          randomnessSummary: gate.summary,
+          allowSequenceModels: flags.enableMarkov,
+          sample: rounds.length,
+        },
+        'Randomness gate evaluated'
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { component: 'Prewarm', error: err instanceof Error ? err.message : String(err) },
+      'Randomness gate skipped'
+    );
+  }
 
   const durationMs = performance.now() - t0;
   const result: PrewarmResult = {

@@ -37,7 +37,9 @@
     "typecheck:all": "tsc --noEmit",
     "verify:phase5": "node scripts/phase5-verification.mjs",
     "test:security": "jest --testPathPattern=tests/unit/security --passWithNoTests",
-    "test:referrals": "jest --testPathPattern=tests/unit/referrals --passWithNoTests"
+    "test:referrals": "jest --testPathPattern=tests/unit/referrals --passWithNoTests",
+    "bench:prediction": "node scripts/prediction-perf-bench.mjs",
+    "validate:randomness": "node -e \"console.log('Use runRandomnessGate from app with \u226550k rounds')\""
   },
   "keywords": [
     "automation",
