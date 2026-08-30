@@ -30,6 +30,8 @@ export function hydrateSecretsFromFiles(): void {
     'TELEGRAM_BOT_TOKEN',
     'ENCRYPTION_KEY',
     'TELEGRAM_OPERATOR_CHAT_ID',
+    'JWT_SECRET',
+    'REFRESH_SECRET',
   ];
   for (const key of keys) {
     if (!process.env[key]) {

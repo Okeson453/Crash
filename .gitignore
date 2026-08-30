@@ -23,7 +23,13 @@ secrets/
 *.p12
 *.pfx
 credentials*
-*secret*
+# secrets on disk (not source modules)
+*.pem
+*.key
+.env.secrets
+secrets/
+!src/config/jwt-secret.ts
+!src/config/secret-files.ts
 *password*
 *token*
 !src/config/secret-files.ts

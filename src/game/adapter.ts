@@ -18,7 +18,6 @@ export interface GameAdapterOptions {
   enableWsAdapter?: boolean;
   enableApiAdapter?: boolean;
   primarySource?: 'ws' | 'api' | 'dom';
-  enableApiAdapter?: boolean;
   pollIntervalMs?: number;
 }
 
@@ -35,7 +34,7 @@ export interface GameAdapterOptions {
  * - Emitting normalized events
  */
 export class GameAdapter extends EventEmitter implements IGameAdapter {
-  private readonly options: Required<GameAdapterOptions>;
+  private readonly options: GameAdapterOptions & { enableDomAdapter: boolean; enableWsAdapter: boolean; enableApiAdapter: boolean; primarySource: "ws" | "api" | "dom"; pollIntervalMs: number };
   private readonly logger = getLogger();
   private started = false;
   private domMissStreak = 0;
@@ -54,9 +53,8 @@ export class GameAdapter extends EventEmitter implements IGameAdapter {
       enableDomAdapter: true,
       // Multi-source observation enabled by default (P0.4). Feature flags can still disable.
       enableWsAdapter: true,
-      enableApiAdapter: true,
+      enableApiAdapter: false, // REST adapter not implemented
       primarySource: (process.env.GAME_PRIMARY_SOURCE as 'ws' | 'api' | 'dom') || 'ws',
-      enableApiAdapter: true,
       pollIntervalMs: TIMEOUTS.domAdapterPollInterval,
       ...options,
     };
