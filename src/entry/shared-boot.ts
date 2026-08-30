@@ -5,6 +5,7 @@
 import { loadAndValidateConfig, resolveProcessRole } from '../config/loader.js';
 import type { AppConfig } from '../config/schema.js';
 import { createPool } from '../persistence/client.js';
+import { resolveDatabasePoolSize } from '../persistence/pool-size.js';
 import { createRedisClient } from '../persistence/redis-client.js';
 import { getLogger } from '../observability/logger.js';
 
@@ -18,7 +19,9 @@ export function bootPersistence(config: AppConfig, opts?: { requireRedis?: boole
   if (!databaseUrl) {
     throw new Error('DATABASE_URL is required');
   }
-  createPool({ connectionString: databaseUrl, poolSize: Number(process.env.DB_POOL_SIZE ?? 10) });
+  const poolSize = resolveDatabasePoolSize(config);
+  createPool({ connectionString: databaseUrl, poolSize });
+  getLogger().info({ component: 'Boot', poolSize, role: resolveProcessRole(config) }, 'Database pool sized');
 
   const redisUrl = process.env.REDIS_URL;
   const role = resolveProcessRole(config);

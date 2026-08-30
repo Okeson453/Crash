@@ -64,6 +64,7 @@ import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
 import { TenantManager, TenantResolver, TenantRuntimeFactory } from '../platform';
 import { wireDryRunSignalBridge, onRoundCrashedForDryRun } from './dry-run-bridge';
+import { checkEntryLatencySlo } from '../observability/performance/entry-slo-guard';
 
 export interface CompositionContext {
   config: AppConfig;
@@ -276,7 +277,7 @@ export function composeApplication(
   const decisionEngine = new DecisionEngine({ ranker: opportunityRanker, sheathMode, baseEnterThreshold: 0.42 });
   const featureStore = new FeatureStore();
   const ensemble = new EnsembleOrchestrator();
-  const jobQueue = new PriorityJobQueue();
+  const jobQueue = new PriorityJobQueue({ concurrency: 2, maxDepth: 500 });
   const workerFleet = new WorkerFleet();
   const regimeWorker = new RegimeWorker();
 
@@ -410,11 +411,35 @@ export function composeApplication(
         eventId: String(event.id ?? `${Date.now()}`),
         receivedAt: new Date().toISOString(),
       });
-      const dispatch = (name: string, payload: Record<string, unknown>, event: { id?: string; correlationId?: string }) => {
+      const CRITICAL_WORKERS = new Set(['prediction-1', 'execution-1', 'settlement-1']);
+      const dispatchHot = (name: string, payload: Record<string, unknown>, event: { id?: string; correlationId?: string }) => {
         const worker = ctx.workerFleet.get(name);
         if (!worker) return;
         void worker.process(payload, workerContext(event)).catch((err) =>
           logger.error({ component: 'WorkerPipeline', worker: name, error: String(err) }, 'Worker job failed')
+        );
+      };
+      // Bounded background queue for non-critical workers (concurrency 2)
+      jobQueue.onProcess(async (job) => {
+        const body = job.payload as { worker: string; payload: Record<string, unknown>; event: { id?: string; correlationId?: string } };
+        const worker = ctx.workerFleet.get(body.worker);
+        if (!worker) return;
+        await worker.process(body.payload, workerContext(body.event));
+      });
+      const dispatchCold = (
+        name: string,
+        payload: Record<string, unknown>,
+        event: { id?: string; correlationId?: string },
+        priority: 'low' | 'normal' = 'low'
+      ) => {
+        if (CRITICAL_WORKERS.has(name)) {
+          dispatchHot(name, payload, event);
+          return;
+        }
+        jobQueue.enqueue(
+          { worker: name, payload, event },
+          priority,
+          { id: `${name}:${String(payload.roundId ?? event.id ?? '')}` }
         );
       };
       const onEvent = (type: string, fn: (payload: Record<string, unknown>, event: { id?: string; correlationId?: string }) => void) => {
@@ -422,16 +447,23 @@ export function composeApplication(
       };
 
       onEvent('RoundStarted', (payload, event) => {
-        dispatch('discovery-1', payload, event);
-        dispatch('prediction-1', { ...payload, evaluate: true }, event);
+        // HOT: prediction evaluate only
+        dispatchHot('prediction-1', { ...payload, evaluate: true }, event);
+        // COLD
+        dispatchCold('discovery-1', payload, event, 'low');
       });
       onEvent('RoundCrashed', (payload, event) => {
+        // HOT: dry-run bridge + observe/learn on prediction path + sheath tick
         onRoundCrashedForDryRun({ payload, entryDecisionService, supervisor });
-        dispatch('signal-scanner-1', payload, event);
-        dispatch('regime-1', payload, event);
-        dispatch('learning-1', payload, event);
-        dispatch('prediction-1', { ...payload, completedCrash: true, evaluate: false }, event);
+        dispatchHot('prediction-1', { ...payload, completedCrash: true, evaluate: false }, event);
         ctx.sheathMode.onRoundTick();
+        checkEntryLatencySlo(ctx.sheathMode);
+        // COLD: background fleet
+        dispatchCold('signal-scanner-1', payload, event, 'low');
+        dispatchCold('regime-1', payload, event, 'low');
+        dispatchCold('learning-1', payload, event, 'low');
+        dispatchCold('analytics-1', payload, event, 'low');
+        dispatchCold('validation-1', payload, event, 'low');
       });
 
       logger.info({ component: 'Composition', phase: supervisor.getState?.()?.phase }, 'SessionSupervisor started');

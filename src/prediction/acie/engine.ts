@@ -36,6 +36,7 @@ import {
   StrategyPolicy,
   StrategyRiskState,
 } from './types.js';
+import { acieHeavyEvidenceLatencyMs } from '../metrics-acie.js';
 
 export interface ACIEEngineOptions {
   strategyPolicy?: Partial<StrategyPolicy>;
@@ -76,6 +77,9 @@ export class ACIEEngine {
   private lastEvidence: EvidenceReport | null = null;
   private lastModelProbabilities: Record<string, number> = {};
   private readonly heavyEvery: number;
+  private pendingHeavyEvidence = false;
+  private heavyEvidenceScheduled = false;
+  private readonly evidenceMaxN: number;
   private readonly ewmaAlpha: number;
   private lastRiskState: Partial<StrategyRiskState> = {};
 
@@ -91,6 +95,7 @@ export class ACIEEngine {
     });
     this.entitlement = new EntitlementGate();
     this.heavyEvery = opts.heavyValidationEvery ?? 50;
+    this.evidenceMaxN = Number(process.env.ACIE_EVIDENCE_MAX_N ?? 1000);
     this.ewmaAlpha = opts.ewmaAlpha ?? 0.05;
   }
 
@@ -164,9 +169,43 @@ export class ACIEEngine {
     return { evaluation, entitlement: null, delivered: evaluation.signal };
   }
 
+
+  /**
+   * Cold path: run evidenceEngine.evaluate off the crash tick (setImmediate).
+   * Caps history to ACIE_EVIDENCE_MAX_N.
+   */
+  private scheduleHeavyEvidence(): void {
+    if (this.heavyEvidenceScheduled || !this.pendingHeavyEvidence) return;
+    this.heavyEvidenceScheduled = true;
+    const run = () => {
+      this.heavyEvidenceScheduled = false;
+      if (!this.pendingHeavyEvidence) return;
+      this.pendingHeavyEvidence = false;
+      try {
+        const t0 = performance.now();
+        const all = this.sol.getRecords();
+        const capped = (all.length > this.evidenceMaxN ? all.slice(-this.evidenceMaxN) : all).slice();
+        this.lastEvidence = this.evidenceEngine.evaluate(capped);
+        this.online = {
+          ...this.online,
+          sinceHeavyValidation: 0,
+          lastHeavyValidationAt: this.online.observationCount,
+        };
+        const ms = performance.now() - t0;
+        acieHeavyEvidenceLatencyMs.observe(ms);
+      } catch {
+        /* keep lastEvidence / lightweight */
+      }
+    };
+    if (typeof setImmediate === 'function') setImmediate(run);
+    else setTimeout(run, 0);
+  }
+
   getEvidenceSnapshot(): EvidenceReport {
     if (this.lastEvidence) return this.lastEvidence;
-    return this.evidenceEngine.evaluate([...this.sol.getRecords()]);
+    const all = this.sol.getRecords();
+    const capped = (all.length > this.evidenceMaxN ? all.slice(-this.evidenceMaxN) : all).slice();
+    return this.evidenceEngine.evaluate(capped);
   }
 
   getConsecutiveLosses(): number {
@@ -251,18 +290,13 @@ export class ACIEEngine {
       alpha: this.ewmaAlpha,
     });
 
-    // 4) Heavy validation on schedule (not blocking)
+    // 4) Heavy validation — FLAG ONLY on hot path (never O(n) evaluate here)
     let heavyValidationRan = false;
     if (this.online.sinceHeavyValidation >= this.heavyEvery) {
-      this.lastEvidence = this.evidenceEngine.evaluate([...this.sol.getRecords()]);
-      this.online = {
-        ...this.online,
-        sinceHeavyValidation: 0,
-        lastHeavyValidationAt: this.online.observationCount,
-      };
-      heavyValidationRan = true;
-    } else if (!this.lastEvidence) {
-      // Lightweight evidence proxy from online metrics until first heavy pass
+      this.pendingHeavyEvidence = true;
+      this.scheduleHeavyEvidence();
+    }
+    if (!this.lastEvidence) {
       this.lastEvidence = this.lightweightEvidence();
     }
 

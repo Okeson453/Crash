@@ -21,6 +21,7 @@ import { healthRoutes } from './routes/health';
 import { plansRoutes } from './routes/plans';
 import { referralsRoutes } from './routes/referrals';
 import { metricsRegistry } from '../observability/metrics/registry';
+import { refreshPoolMetrics } from '../persistence/pool-metrics';
 
 export async function createApiServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -164,6 +165,7 @@ export async function createApiServer(): Promise<FastifyInstance> {
 
   // Prometheus metrics (Phase 5.8)
   fastify.get('/metrics', async (_request, reply) => {
+    refreshPoolMetrics();
     reply.header('Content-Type', metricsRegistry.contentType);
     reply.send(await metricsRegistry.metrics());
   });

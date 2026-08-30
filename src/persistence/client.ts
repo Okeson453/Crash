@@ -56,6 +56,32 @@ export function getPool(): Pool {
   return pool;
 }
 
+/** Snapshot for Prometheus / backpressure */
+export function getPoolStats(): {
+  total: number;
+  idle: number;
+  waiting: number;
+} {
+  const p = getPool() as Pool & {
+    totalCount?: number;
+    idleCount?: number;
+    waitingCount?: number;
+  };
+  return {
+    total: p.totalCount ?? 0,
+    idle: p.idleCount ?? 0,
+    waiting: p.waitingCount ?? 0,
+  };
+}
+
+export function isPoolSaturated(threshold = 5): boolean {
+  try {
+    return getPoolStats().waiting >= threshold;
+  } catch {
+    return false;
+  }
+}
+
 export async function query<T extends QueryResultRow = QueryResultRow>(
   sql: string,
   params?: unknown[]
