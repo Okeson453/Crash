@@ -4,7 +4,6 @@
  */
 
 import { Worker } from 'worker_threads';
-import { fileURLToPath } from 'url';
 import path from 'path';
 
 export interface OffloadResult<T> {
@@ -14,15 +13,13 @@ export interface OffloadResult<T> {
 
 /** Run a pure JSON-serializable job in a worker when possible */
 export async function offloadJsonJob<T>(
-  workerRelativePath: string,
+  workerAbsolutePath: string,
   workerData: unknown,
   inlineFallback: () => T | Promise<T>
 ): Promise<OffloadResult<T>> {
   try {
-    const base = path.dirname(fileURLToPath(import.meta.url));
-    const workerPath = path.join(base, workerRelativePath);
     const result = await new Promise<T>((resolve, reject) => {
-      const w = new Worker(workerPath, { workerData });
+      const w = new Worker(path.resolve(workerAbsolutePath), { workerData });
       w.on('message', (msg) => resolve(msg as T));
       w.on('error', reject);
       w.on('exit', (code) => {
