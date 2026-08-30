@@ -62,6 +62,9 @@ import { FeatureStore } from '../prediction/feature-store';
 import { EnsembleOrchestrator } from '../prediction/ensemble';
 import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
+import { SettlementReconciler } from '../background-workers/settlement-reconciler';
+import { setPrewarmResult, isReadyForLive } from '../observability/readiness';
+import { loadPredictionStackOnBoot, saveSnapshotToFile } from '../prediction/state/state-persistence';
 import { TenantManager, TenantResolver, TenantRuntimeFactory } from '../platform';
 import { wireDryRunSignalBridge, onRoundCrashedForDryRun } from './dry-run-bridge';
 import { checkEntryLatencySlo } from '../observability/performance/entry-slo-guard';
@@ -278,6 +281,17 @@ export function composeApplication(
   const featureStore = new FeatureStore();
   const ensemble = new EnsembleOrchestrator();
   const jobQueue = new PriorityJobQueue({ concurrency: 2, maxDepth: 500 });
+  let settlementReconciler: SettlementReconciler | null = null;
+  try {
+    settlementReconciler = new SettlementReconciler(getPool(), null, {
+      enabled: true,
+      pollIntervalMs: 60_000,
+      reconcileDeadlineMs: 15 * 60 * 1000,
+      batchSize: 50,
+    });
+  } catch (e) {
+    logger.warn({ component: 'Composition', error: String(e) }, 'SettlementReconciler init skipped');
+  }
   const workerFleet = new WorkerFleet();
   const regimeWorker = new RegimeWorker();
 
@@ -368,17 +382,37 @@ export function composeApplication(
     if (config.system.mode === 'maintenance') return;
 
     try {
+      try {
+        await loadPredictionStackOnBoot(null, entryDecisionService.getACIE());
+      } catch { /* snapshot optional */ }
       const warm = await prewarmPredictionStack(entryDecisionService, 500);
+      setPrewarmResult(warm);
+      try {
+        await saveSnapshotToFile(undefined, entryDecisionService.getACIE());
+      } catch { /* */ }
       logger.info(
         {
           component: 'Composition',
           ...warm,
-          liveReady: warm.stateWarm && warm.acieHistorySize >= 20,
+          liveReady: isReadyForLive(),
         },
         'Prediction prewarm complete'
       );
-      logger.info({ component: 'Composition', ...warm }, 'Prediction stack pre-warmed');
+      if (config.system.mode === 'live' && !isReadyForLive()) {
+        logger.warn({ component: 'Composition' }, 'Live mode but prediction not ready — sheath cold');
+        try {
+          ctx.sheathMode.reportTriggers([
+            {
+              id: 'prediction_cold_state',
+              severity: 'high',
+              message: 'prediction cold after prewarm',
+              detectedAt: new Date().toISOString(),
+            },
+          ]);
+        } catch { /* */ }
+      }
     } catch (err) {
+      setPrewarmResult(null, err instanceof Error ? err.message : String(err));
       logger.warn({ component: 'Composition', error: String(err) }, 'Pre-warm failed');
     }
 
@@ -466,6 +500,7 @@ export function composeApplication(
         dispatchCold('validation-1', payload, event, 'low');
       });
 
+      settlementReconciler?.start();
       logger.info({ component: 'Composition', phase: supervisor.getState?.()?.phase }, 'SessionSupervisor started');
     }
 
@@ -473,6 +508,10 @@ export function composeApplication(
   }
 
   async function stop(): Promise<void> {
+    try { settlementReconciler?.stop(); } catch { /* */ }
+    try {
+      await saveSnapshotToFile(undefined, entryDecisionService.getACIE());
+    } catch { /* */ }
     notificationRouter?.stop();
     dailyReportScheduler?.stop();
     try { await ctx.workerFleet.stopAll(); } catch { /* */ }

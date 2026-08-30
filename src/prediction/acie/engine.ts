@@ -112,6 +112,41 @@ export class ACIEEngine {
     return this.tpl.computeSequenceState(this.crashPoints);
   }
 
+
+  exportSnapshot(): {
+    online: OnlineAdaptiveState;
+    crashPoints: number[];
+    consecutiveLosses: number;
+  } {
+    return {
+      online: { ...this.online },
+      crashPoints: this.crashPoints.slice(-2000),
+      consecutiveLosses: this.consecutiveLosses,
+    };
+  }
+
+  importSnapshot(snap: {
+    online?: OnlineAdaptiveState;
+    crashPoints?: number[];
+    consecutiveLosses?: number;
+  }): void {
+    if (snap.crashPoints?.length) {
+      this.seedHistory(
+        snap.crashPoints.map((cp, i) => ({
+          roundId: `restore-${i}`,
+          crashPoint: cp,
+          timestamp: new Date().toISOString(),
+        }))
+      );
+    }
+    if (snap.online) {
+      this.online = { ...snap.online };
+    }
+    if (typeof snap.consecutiveLosses === 'number') {
+      this.consecutiveLosses = snap.consecutiveLosses;
+    }
+  }
+
   getOnlineState(): Readonly<OnlineAdaptiveState> {
     return this.online;
   }

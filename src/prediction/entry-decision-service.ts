@@ -27,6 +27,8 @@ import { globalCalibrationState } from './calibration/calibration-state.js';
 
 import { RoundRepository } from '../persistence/repositories/round-repo.js';
 import { ACIEEngine } from './acie/engine.js';
+import { globalLiveDivergence } from './validation/live-divergence-monitor.js';
+import { onlineMeanCalibrationError } from './acie/online-state.js';
 import type { CrashLearningResult } from './acie/engine.js';
 import type { StrategyRiskState } from './acie/types.js';
 import { randomUUID } from 'crypto';
@@ -161,6 +163,19 @@ export class EntryDecisionService {
       if (this.lastEmittedProbability != null && this.lastEmittedProbability > 0) {
         globalCalibrationState.observe(this.lastEmittedProbability, actual, 'global');
         feedbackPredictionPipeline(this.lastEmittedProbability, actual);
+        const div = globalLiveDivergence.observe(this.lastEmittedProbability, actual);
+        if (div.actions.fullSheathHaltEntries) {
+          this.logger.warn(
+            { component: 'EntryDecisionService', level: div.level, reason: div.reason },
+            'Live divergence full sheath — halt entries'
+          );
+          // sheath is coordinated via composition RoundCrashed; also set learning state
+          this.publishLearningState({
+            divergenceLevel: div.level,
+            divergenceReason: div.reason ?? undefined,
+          } as never);
+        }
+
       }
       tickLearningWithHooks(this.sheathMode);
       const prod = globalProductionController.status();
@@ -334,6 +349,17 @@ export class EntryDecisionService {
       } else if (signal) {
         this.lastSignal = signal;
         this.lastEmittedProbability = signal.probability;
+        // Honest prediction quality labels (P1)
+        (signal as Record<string, unknown>).modelFamily = 'acie-heuristic-ensemble';
+        (signal as Record<string, unknown>).heuristic = true;
+        (signal as Record<string, unknown>).modelVersion = 'acie-v3';
+        try {
+          (signal as Record<string, unknown>).calibrationError = onlineMeanCalibrationError(
+            this.acie.getOnlineState()
+          );
+          (signal as Record<string, unknown>).ewmaBrier = this.acie.getOnlineState().ewmaBrier;
+        } catch { /* */ }
+
       }
     } else {
       this.logger.info(

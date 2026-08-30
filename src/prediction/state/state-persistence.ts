@@ -1,6 +1,5 @@
 /**
- * Phase 3.1 — Prediction stack snapshot/restore for multi-instance safety.
- * Hot path stays in process memory; snapshots go to Redis (preferred) or file.
+ * Prediction stack snapshot v2 — crash points, ACIE online, ensemble flags.
  */
 
 import { globalIncrementalState } from './incremental-state-engine.js';
@@ -8,15 +7,20 @@ import { globalCalibrationState } from '../calibration/calibration-state.js';
 import { getLogger } from '../../observability/logger.js';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import type { OnlineAdaptiveState } from '../acie/online-state.js';
 
 const logger = getLogger();
-const SNAPSHOT_KEY = process.env.PREDICTION_SNAPSHOT_REDIS_KEY ?? 'crash:prediction:stack:v1';
+const SNAPSHOT_KEY = process.env.PREDICTION_SNAPSHOT_REDIS_KEY ?? 'crash:prediction:stack:v2';
 
 export interface PredictionStackSnapshot {
+  version: 2;
+  savedAt: string;
   crashPoints: number[];
   calibrationVersion: string;
-  savedAt: string;
-  version: 1;
+  acieOnline?: OnlineAdaptiveState;
+  acieCrashPoints?: number[];
+  acieConsecutiveLosses?: number;
+  ensembleFlags?: Record<string, boolean>;
 }
 
 export type RedisLike = {
@@ -24,17 +28,39 @@ export type RedisLike = {
   set(key: string, value: string, ...args: unknown[]): Promise<unknown>;
 };
 
-export function snapshotPredictionStack(maxPoints = 2000): PredictionStackSnapshot {
+export type AcieLike = {
+  exportSnapshot: () => {
+    online: OnlineAdaptiveState;
+    crashPoints: number[];
+    consecutiveLosses: number;
+  };
+  importSnapshot: (snap: {
+    online?: OnlineAdaptiveState;
+    crashPoints?: number[];
+    consecutiveLosses?: number;
+  }) => void;
+};
+
+export function snapshotPredictionStack(
+  maxPoints = 2000,
+  acie?: AcieLike | null
+): PredictionStackSnapshot {
   const points =
-    typeof (globalIncrementalState as unknown as { getRecentPoints?: (n: number) => number[] }).getRecentPoints ===
-    'function'
-      ? (globalIncrementalState as unknown as { getRecentPoints: (n: number) => number[] }).getRecentPoints(maxPoints)
+    typeof (globalIncrementalState as unknown as { getRecentPoints?: (n: number) => number[] })
+      .getRecentPoints === 'function'
+      ? (globalIncrementalState as unknown as { getRecentPoints: (n: number) => number[] }).getRecentPoints(
+          maxPoints
+        )
       : [];
+  const acieSnap = acie?.exportSnapshot();
   return {
+    version: 2,
+    savedAt: new Date().toISOString(),
     crashPoints: points,
     calibrationVersion: globalCalibrationState.version,
-    savedAt: new Date().toISOString(),
-    version: 1,
+    acieOnline: acieSnap?.online,
+    acieCrashPoints: acieSnap?.crashPoints,
+    acieConsecutiveLosses: acieSnap?.consecutiveLosses,
   };
 }
 
@@ -47,19 +73,40 @@ export function restoreIncrementalFromPoints(points: number[]): void {
   );
 }
 
-export async function saveSnapshotToRedis(redis: RedisLike): Promise<void> {
-  const snap = snapshotPredictionStack();
-  // If no points extracted, still save metadata
-  await redis.set(SNAPSHOT_KEY, JSON.stringify(snap), 'EX', 86400);
-  logger.info({ component: 'StatePersistence', points: snap.crashPoints.length }, 'Snapshot saved to Redis');
+export function applySnapshot(snap: PredictionStackSnapshot, acie?: AcieLike | null): void {
+  const pts = snap.crashPoints?.length ? snap.crashPoints : snap.acieCrashPoints;
+  if (pts?.length) restoreIncrementalFromPoints(pts);
+  if (acie && (snap.acieOnline || snap.acieCrashPoints?.length)) {
+    acie.importSnapshot({
+      online: snap.acieOnline,
+      crashPoints: snap.acieCrashPoints ?? snap.crashPoints,
+      consecutiveLosses: snap.acieConsecutiveLosses,
+    });
+    logger.info({ component: 'StatePersistence' }, 'ACIE online state restored');
+  }
 }
 
-export async function loadSnapshotFromRedis(redis: RedisLike): Promise<boolean> {
+export async function saveSnapshotToRedis(
+  redis: RedisLike,
+  acie?: AcieLike | null
+): Promise<void> {
+  const snap = snapshotPredictionStack(2000, acie);
+  await redis.set(SNAPSHOT_KEY, JSON.stringify(snap));
+  logger.info(
+    { component: 'StatePersistence', points: snap.crashPoints.length },
+    'Snapshot v2 saved to Redis'
+  );
+}
+
+export async function loadSnapshotFromRedis(
+  redis: RedisLike,
+  acie?: AcieLike | null
+): Promise<boolean> {
   try {
     const raw = await redis.get(SNAPSHOT_KEY);
     if (!raw) return false;
     const snap = JSON.parse(raw) as PredictionStackSnapshot;
-    if (snap.crashPoints?.length) restoreIncrementalFromPoints(snap.crashPoints);
+    applySnapshot(snap, acie);
     return true;
   } catch (err) {
     logger.warn(
@@ -70,35 +117,43 @@ export async function loadSnapshotFromRedis(redis: RedisLike): Promise<boolean> 
   }
 }
 
-export async function saveSnapshotToFile(filePath?: string): Promise<string> {
+export async function saveSnapshotToFile(
+  filePath?: string,
+  acie?: AcieLike | null
+): Promise<string> {
   const dest =
     filePath ??
-    path.join(process.env.PREDICTION_SNAPSHOT_DIR ?? '/tmp/crash-snapshots', 'prediction-stack.json');
+    path.join(process.env.PREDICTION_SNAPSHOT_DIR ?? '/tmp/crash-snapshots', 'prediction-stack-v2.json');
   await mkdir(path.dirname(dest), { recursive: true });
-  const snap = snapshotPredictionStack();
+  const snap = snapshotPredictionStack(2000, acie);
   await writeFile(dest, JSON.stringify(snap), 'utf8');
   return dest;
 }
 
-export async function loadSnapshotFromFile(filePath?: string): Promise<boolean> {
+export async function loadSnapshotFromFile(
+  filePath?: string,
+  acie?: AcieLike | null
+): Promise<boolean> {
   const dest =
     filePath ??
-    path.join(process.env.PREDICTION_SNAPSHOT_DIR ?? '/tmp/crash-snapshots', 'prediction-stack.json');
+    path.join(process.env.PREDICTION_SNAPSHOT_DIR ?? '/tmp/crash-snapshots', 'prediction-stack-v2.json');
   try {
     const raw = await readFile(dest, 'utf8');
     const snap = JSON.parse(raw) as PredictionStackSnapshot;
-    if (snap.crashPoints?.length) restoreIncrementalFromPoints(snap.crashPoints);
+    applySnapshot(snap, acie);
     return true;
   } catch {
     return false;
   }
 }
 
-/** Boot helper: try Redis then file */
-export async function loadPredictionStackOnBoot(redis?: RedisLike | null): Promise<void> {
+export async function loadPredictionStackOnBoot(
+  redis?: RedisLike | null,
+  acie?: AcieLike | null
+): Promise<void> {
   if (redis) {
-    const ok = await loadSnapshotFromRedis(redis);
+    const ok = await loadSnapshotFromRedis(redis, acie);
     if (ok) return;
   }
-  await loadSnapshotFromFile();
+  await loadSnapshotFromFile(undefined, acie);
 }
