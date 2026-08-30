@@ -35,7 +35,7 @@ import {
   feedbackPredictionPipeline,
 } from './prediction-pipeline.js';
 import { globalProductionController } from './lifecycle/production-controller.js';
-import { globalLearningScheduler } from './learning/learning-scheduler.js';
+import { tickLearningWithHooks } from './learning/learning-bootstrap.js';
 import { assertPredictionWarmForLive } from './prewarm.js';
 import type { SheathMode } from '../core/sheath-mode/index.js';
 
@@ -137,7 +137,7 @@ export class EntryDecisionService {
         globalCalibrationState.observe(this.lastEmittedProbability, actual, 'global');
         feedbackPredictionPipeline(this.lastEmittedProbability, actual);
       }
-      globalLearningScheduler.tick();
+      tickLearningWithHooks(this.sheathMode);
       const prod = globalProductionController.status();
       this.sheathMode?.reportPredictionHealth({
         divergenceLevel: prod.divergence.level,

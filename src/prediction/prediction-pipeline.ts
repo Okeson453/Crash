@@ -22,6 +22,11 @@ import { globalFeatureDrift } from './drift/feature-drift.js';
 import { globalPredictionDrift } from './drift/prediction-drift.js';
 import { globalConceptDrift } from './drift/concept-drift.js';
 import { scoreCandidates } from './models/candidate-models.js';
+import { globalLearnedRegimes } from './regimes/learned-clustering.js';
+import { globalLookaheadEngine } from './lookahead/lookahead-engine.js';
+import { globalOpportunityWindow } from './opportunity/opportunity-window.js';
+import { globalModelLifecycle } from './lifecycle/model-lifecycle.js';
+
 
 export interface PipelineInput {
   baseProbability: number;
@@ -60,6 +65,26 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
   const snap = globalIncrementalState.snapshot();
   const predictionId = input.predictionId ?? randomUUID();
 
+  // Learned regime (only if fitted offline) — never invents clusters at runtime without model
+  let learnedRegimeLabel = input.regime;
+  let learnedRegimeConfidence = input.regimeConfidence ?? 0.6;
+  if (globalLearnedRegimes.isFitted()) {
+    const row = [
+      snap.ewmaHit13,
+      snap.ewma,
+      snap.runs.below13,
+      snap.runs.above13,
+      globalIncrementalState.shortHitRate13(),
+      globalIncrementalState.markovPNextAbove13(),
+      snap.welford.mean,
+      Math.sqrt(Math.max(0, snap.welford.m2 / Math.max(1, snap.welford.n - 1))),
+    ];
+    const assigned = globalLearnedRegimes.assign(row);
+    learnedRegimeLabel = assigned.label;
+    learnedRegimeConfidence = assigned.clusterConfidence;
+  }
+
+
   // Ensemble blend
   const scores: ModelScore[] =
     input.modelScores ??
@@ -94,7 +119,7 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
   const metaFeatures: MetaFeatures = {
     baseProbability: ensemble.probability,
     disagreement: ensemble.disagreement,
-    regimeConfidence: input.regimeConfidence ?? 0.6,
+    regimeConfidence: learnedRegimeConfidence,
     dataQuality: input.dataQuality ?? Math.min(1, snap.count / 100),
     sampleCount: snap.count,
     recentLogLoss: calMetrics.logLoss || 0.5,
@@ -109,7 +134,7 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
   // Calibration
   const calibratedProbability = globalCalibrationState.calibrateWithShrinkage(
     blended,
-    input.regime,
+    learnedRegimeLabel,
     snap.ewmaHit13,
     snap.count
   );
@@ -187,6 +212,14 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
   }
 
   // Opportunity rank
+  // Shadow meta model (lifecycle SHADOW) — score but never authorize alone
+  try {
+    const metaShadow = globalModelLifecycle.get('meta', 'lr-v1');
+    if (metaShadow && metaShadow.stage === 'SHADOW') {
+      // meta probability already in blend; shadow is observational
+    }
+  } catch { /* */ }
+
   const opportunity = globalOpportunityRanker.scoreAndInsert({
     predictionId,
     target: selected.target,
@@ -194,7 +227,7 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
     calibratedProbability: selected.calibratedProbability,
     expectedValue: selected.shrunkEV,
     confidence: selected.confidence,
-    regime: input.regime,
+    regime: learnedRegimeLabel,
     modelVersion: input.modelVersion ?? 'pipeline-v1',
     featureVersion: input.featureVersion ?? 'fv-2.0.0',
     inputs: {
@@ -206,6 +239,10 @@ export function runPredictionPipeline(input: PipelineInput): PipelineResult {
       executionQuality: input.executionQuality ?? 0.9,
     },
   });
+  globalOpportunityWindow.push(opportunity);
+
+  // Lookahead (no-op when disabled)
+  globalLookaheadEngine.evaluate(globalIncrementalState);
 
   // Kelly
   let kelly: KellyResult | null = null;

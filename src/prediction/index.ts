@@ -53,3 +53,9 @@ export { runValidationProtocol } from './validation/walk-forward-protocol.js';
 export { LearnedRegimeClustering, globalLearnedRegimes } from './regimes/learned-clustering.js';
 export { LookaheadEngine, globalLookaheadEngine } from './lookahead/lookahead-engine.js';
 export { OpportunityWindow, globalOpportunityWindow } from './opportunity/opportunity-window.js';
+export { runDesignAcceptance } from './validation/design-acceptance.js';
+export { tickLearningWithHooks, installLearningHooks } from './learning/learning-bootstrap.js';
+export {
+  PredictionProvenanceRepository,
+  InMemoryPredictionProvenanceRepository,
+} from '../persistence/repositories/prediction-provenance-repo.js';

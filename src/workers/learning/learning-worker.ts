@@ -1,17 +1,19 @@
 /**
- * Learning Worker — outcome processing, drift hooks, calibration touchpoints.
- * Design ref: Section 3.3.11
+ * Learning Worker — outcomes, drift, calibration, feedback to prediction stack.
  */
 
 import { BaseWorker } from '../framework/base-worker';
 import type { WorkerContext } from '../framework/types';
 import type { SheathMode } from '../../core/sheath-mode';
 import type { SheathTrigger } from '../../core/sheath-mode';
+import { feedbackPredictionPipeline } from '../../prediction/prediction-pipeline';
+import { globalCalibrationState } from '../../prediction/calibration/calibration-state';
+import { tickLearningWithHooks } from '../../prediction/learning/learning-bootstrap';
+import { globalEnsemble } from '../../prediction/ensemble/ensemble-orchestrator';
 
 export interface LearningWorkerDeps {
   sheathMode?: SheathMode;
   onOutcome?: (payload: Record<string, unknown>) => Promise<void>;
-  /** Rolling accuracy 0–1; if provided and low, may raise sheath trigger */
   getRollingAccuracy?: () => number;
   accuracyBaseline?: number;
   publishState?: () => void | Promise<void>;
@@ -35,13 +37,49 @@ export class LearningWorker extends BaseWorker {
 
   protected async handle(payload: unknown, _ctx: WorkerContext): Promise<void> {
     const p = (payload ?? {}) as Record<string, unknown>;
-    if (this.deps.onOutcome) await this.deps.onOutcome(p);
-    // Learning is isolated from inference; publish a new immutable state version only after completion.
-    await this.deps.publishState?.();
+    const crashPoint = Number(p.crashPoint);
+    const predicted = Number(p.predictedProbability ?? p.probability);
+    const actual: 0 | 1 =
+      Number.isFinite(crashPoint) && crashPoint > 0
+        ? crashPoint >= 1.3
+          ? 1
+          : 0
+        : Number(p.actual) === 1
+          ? 1
+          : 0;
 
-    const won = p.won === true || p.outcome === 'win' || p.reachedTarget === true;
     this.outcomes += 1;
-    if (won) this.wins += 1;
+    if (actual === 1) this.wins += 1;
+
+    if (Number.isFinite(predicted) && predicted > 0) {
+      feedbackPredictionPipeline(predicted, actual);
+      globalCalibrationState.observe(predicted, actual, String(p.regime ?? 'global'));
+      // Ensemble model performance feedback when scores provided
+      const scores = p.modelScores as
+        | Array<{ modelName: string; probability: number }>
+        | undefined;
+      if (Array.isArray(scores)) {
+        globalEnsemble.observeOutcome(
+          scores.map((s) => ({
+            modelName: s.modelName,
+            modelVersion: '1',
+            probability: s.probability,
+            confidence: 0.5,
+            weight: 1,
+          })),
+          actual
+        );
+      }
+    }
+
+    tickLearningWithHooks(this.deps.sheathMode ?? null);
+
+    if (this.deps.onOutcome) {
+      await this.deps.onOutcome(p);
+    }
+    if (this.deps.publishState) {
+      await this.deps.publishState();
+    }
 
     const accuracy =
       this.deps.getRollingAccuracy?.() ??
