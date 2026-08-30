@@ -81,8 +81,13 @@ export async function createApiServer(): Promise<FastifyInstance> {
         },
       }),
     };
+    const isProd = process.env.NODE_ENV === 'production';
+    if (!redisUrl && isProd && process.env.ALLOW_INMEMORY_RATE_LIMIT !== 'true') {
+      throw new Error(
+        'REDIS_URL (or RATE_LIMIT_REDIS_URL) required for rate limiting in production; set ALLOW_INMEMORY_RATE_LIMIT=true to override (single-instance only)'
+      );
+    }
     if (redisUrl) {
-      // Prefer Redis store when @fastify/rate-limit redis option is available at runtime
       try {
         const ioredis = await import('ioredis');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,9 +95,11 @@ export async function createApiServer(): Promise<FastifyInstance> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const redis: any = new RedisAny(redisUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
         rateLimitOpts.redis = redis;
-      } catch {
-        if (process.env.NODE_ENV === 'production' && process.env.REQUIRE_REDIS === 'true') {
-          throw new Error('Rate-limit Redis required but unavailable');
+      } catch (err) {
+        if (isProd && process.env.ALLOW_INMEMORY_RATE_LIMIT !== 'true') {
+          throw new Error(
+            `Rate-limit Redis unavailable: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
     }

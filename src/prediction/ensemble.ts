@@ -1,3 +1,4 @@
+/** @deprecated LEGACY shim — use ensemble/ensemble-orchestrator.ts */
 /** @deprecated import from './ensemble/ensemble-orchestrator.js' */
 export {
   EnsembleOrchestrator,

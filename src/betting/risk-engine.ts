@@ -1,4 +1,5 @@
 import { getLogger } from '../observability/logger';
+import { globalFinancialCircuitBreaker } from '../core/circuit-breaker/financial-circuit-breaker.js';
 import {
   RiskEvaluationInput,
   RiskEvaluationResult,
@@ -30,6 +31,17 @@ export class RiskEngine {
    * RiskEngine's approval is the authoritative business-level decision.
    */
   evaluate(input: RiskEvaluationInput): RiskEvaluationResult {
+    const circuit = globalFinancialCircuitBreaker.snapshot();
+    if (circuit.state === 'OPEN') {
+      const conditions = this.evaluateAllConditions(input);
+      return {
+        approved: false,
+        conditions,
+        rejectionReason: 'Financial circuit breaker is OPEN — entries suspended',
+        firstFailure: 'financial_circuit_open',
+      };
+    }
+
     const conditions = this.evaluateAllConditions(input);
     const failures = this.collectFailures(conditions);
 

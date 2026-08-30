@@ -22,15 +22,8 @@ declare module 'fastify' {
   }
 }
 
-function resolveJwtSecret(): string {
-  const secret = process.env.JWT_SECRET?.trim();
-  const isProd = process.env.NODE_ENV === 'production';
-  if (isProd && (!secret || secret === 'development-secret-change-in-production' || secret.length < 32)) {
-    throw new Error('JWT_SECRET must be set (≥32 chars) in production');
-  }
-  return secret || (process.env.NODE_ENV === 'test' ? 'test-jwt-secret-for-unit-tests-only-32chars' : 'development-secret-change-in-production');
-}
-const JWT_SECRET = resolveJwtSecret();
+import { resolveJwtSecretString } from '@/config/jwt-secret';
+const JWT_SECRET = resolveJwtSecretString();
 
 export async function authenticateRequest(
   request: FastifyRequest,

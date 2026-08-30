@@ -1,3 +1,4 @@
+/** @deprecated LEGACY — quarantined; do not use on live path (Phase 2.5) */
 /**
  * DrawdownCalculator tracks peak equity, consecutive losses, and true
  * peak-to-trough drawdown percentage. Emits alerts when thresholds are breached.

@@ -44,6 +44,8 @@ import {
 import { globalProductionController } from './lifecycle/production-controller.js';
 import { tickLearningWithHooks } from './learning/learning-bootstrap.js';
 import { assertPredictionWarmForLive } from './prewarm.js';
+import { assertFeatureVersionMatch } from './features/feature-version-assert.js';
+import { FEATURE_VERSION_V2 } from './features/feature-meta.js';
 import type { SheathMode } from '../core/sheath-mode/index.js';
 
 import { PredictionStateRegistry, type PredictionStateSnapshot } from './state-snapshot.js';
@@ -360,6 +362,19 @@ export class EntryDecisionService {
     // ACIE SKIP → do not present signal as acceptable opportunity
     if (acieEval && !acieEval.signal && this.preferAcie) {
       riskInput.predictionSignal = undefined;
+    }
+
+    // Feature version consistency (Phase 2.7)
+    if (signal) {
+      try {
+        assertFeatureVersionMatch(signal.featureVersion);
+      } catch (err) {
+        this.logger.warn(
+          { component: 'EntryDecisionService', error: String(err), featureVersion: signal.featureVersion, engine: FEATURE_VERSION_V2 },
+          'Feature version mismatch — discarding signal for live decision'
+        );
+        if (ctx.riskInput.mode === 'live') signal = null;
+      }
     }
 
     // Live warm-state gate (design §21)

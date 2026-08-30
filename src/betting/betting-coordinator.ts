@@ -23,6 +23,7 @@ import { AppConfig } from '../config/schema.js';
 import { DailyEntryLedger } from '../ledger/daily-entries.js';
 import { getDailyKey } from '../utils/day-boundary.js';
 import { checkTenantQuota, recordTenantEntry } from '../platform/tenant-quota.js';
+import { globalFinancialCircuitBreaker } from '../core/circuit-breaker/financial-circuit-breaker.js';
 import type { SheathMode } from '../core/sheath-mode/index.js';
 import type { DecisionEngine } from '../decision/decision-engine.js';
 
@@ -422,6 +423,7 @@ export class BettingCoordinator {
       });
 
       if (result.placed) {
+        void globalFinancialCircuitBreaker.recordSuccess();
         if (this.dailyLedger && reserved) {
           await this.dailyLedger.confirm(dailyKey, betId);
         }
@@ -447,6 +449,7 @@ export class BettingCoordinator {
             result.error ?? 'placement failed'
           );
         }
+        void globalFinancialCircuitBreaker.recordFailure(result.error ?? 'placement failed');
         this.machine.send({
           type: 'BET_PLACEMENT_FAILED',
           reason: result.error ?? 'placement failed',

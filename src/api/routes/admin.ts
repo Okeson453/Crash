@@ -84,34 +84,78 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   };
 
 
+  const defaultBettingConfig = {
+    stakePerEntry: 700,
+    cashOutTarget: 1.3,
+    maxDailyEntries: 100,
+    mode: process.env.SYSTEM_MODE || 'dry-run',
+  };
+
+  function sessionPayload(extra: Record<string, unknown> = {}) {
+    const state = miniGameService.getState();
+    const status =
+      state.phase === 'running' || state.phase === 'countdown'
+        ? 'running'
+        : state.phase === 'crashed'
+          ? 'idle'
+          : state.phase === 'idle'
+            ? 'idle'
+            : state.phase;
+    return {
+      status,
+      mode: process.env.SYSTEM_MODE || 'dry-run',
+      phase: state.phase,
+      roundId: state.roundId,
+      uptimeSeconds: process.uptime(),
+      totalRounds: 0,
+      totalBets: 0,
+      totalPnl: 0,
+      lastError: null,
+      healthChecks: [],
+      serverTime: state.serverTime,
+      ...extra,
+    };
+  }
+
   // GET /api/v1/admin/session
   fastify.get('/session', async (_request, reply) => {
-    const state = miniGameService.getState();
-    reply.send({ data: { status: state.phase === 'running' || state.phase === 'countdown' ? 'running' : 'idle', mode: 'dry-run', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: null, healthChecks: [] } });
+    reply.send({ data: sessionPayload() });
   });
 
-  fastify.post('/game/start', async (_request, reply) => { miniGameService.start(); reply.send({ data: { status: 'running', mode: 'dry-run', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: null, healthChecks: [] } }); });
-  fastify.post('/game/pause', async (_request, reply) => { miniGameService.pause(); reply.send({ data: { status: 'paused', mode: 'dry-run', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: null, healthChecks: [] } }); });
-  fastify.post('/game/resume', async (_request, reply) => { miniGameService.resume(); reply.send({ data: { status: 'running', mode: 'dry-run', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: null, healthChecks: [] } }); });
-  fastify.post('/game/stop', async (_request, reply) => { miniGameService.stop(); reply.send({ data: { status: 'stopped', mode: 'dry-run', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: null, healthChecks: [] } }); });
-  fastify.post('/game/emergency-stop', async (_request, reply) => { miniGameService.emergencyStop(); reply.send({ data: { status: 'stopped', mode: 'maintenance', uptimeSeconds: 0, totalRounds: 0, totalBets: 0, totalPnl: 0, lastError: 'Emergency stop triggered', healthChecks: [] } }); });
+  fastify.post('/game/start', async (_request, reply) => {
+    miniGameService.start();
+    reply.send({ data: sessionPayload({ status: 'running' }) });
+  });
+  fastify.post('/game/pause', async (_request, reply) => {
+    miniGameService.pause();
+    reply.send({ data: sessionPayload({ status: 'paused' }) });
+  });
+  fastify.post('/game/resume', async (_request, reply) => {
+    miniGameService.resume();
+    reply.send({ data: sessionPayload({ status: 'running' }) });
+  });
+  fastify.post('/game/stop', async (_request, reply) => {
+    miniGameService.stop();
+    reply.send({ data: sessionPayload({ status: 'stopped' }) });
+  });
+  fastify.post('/game/emergency-stop', async (_request, reply) => {
+    miniGameService.emergencyStop();
+    reply.send({ data: sessionPayload({ status: 'stopped', mode: 'maintenance', lastError: 'Emergency stop triggered' }) });
+  });
 
-  // GET /api/v1/admin/config
+  // GET /api/v1/admin/config — persisted
   fastify.get('/config', async (_request, reply) => {
-    reply.status(200).send({
-      data: {
-        stakePerEntry: 700,
-        cashOutTarget: 1.3,
-        maxDailyEntries: 100,
-        mode: 'dry-run',
-      },
-    });
+    const data = await loadAdminSetting('betting_config', defaultBettingConfig);
+    reply.status(200).send({ data });
   });
 
-  // PUT /api/v1/admin/config
+  // PUT /api/v1/admin/config — persist + return stored
   fastify.put('/config', { preHandler: requireRole('admin') }, async (request, reply) => {
     const body = configSchema.parse(request.body);
-    reply.status(200).send({ data: body });
+    const current = await loadAdminSetting('betting_config', defaultBettingConfig);
+    const next = { ...current, ...body };
+    await saveAdminSetting('betting_config', next, request.auth?.userId);
+    reply.status(200).send({ data: next });
   });
 
   // GET /api/v1/admin/users
