@@ -192,7 +192,21 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
         return;
       }
       if (channel.startsWith('admin:') && socket.role !== 'operator' && socket.role !== 'admin') { socket.emit('error', { message: 'Admin channel requires operator role' }); return; }
-      if (channel.startsWith('game:') && socket.tenantId && channel !== `game:${socket.tenantId}`) { socket.emit('error', { message: 'Cannot subscribe to another tenant' }); return; }
+      if (channel.startsWith('game:')) {
+        const want = channel.slice('game:'.length);
+        if (!socket.tenantId || want !== socket.tenantId) {
+          socket.emit('error', { message: 'Cannot subscribe to another tenant game channel' });
+          return;
+        }
+      }
+      if (channel.startsWith('admin:')) {
+        const want = channel.slice('admin:'.length);
+        const cross = (socket as { crossTenantScope?: boolean }).crossTenantScope === true;
+        if (!cross && (!socket.tenantId || want !== socket.tenantId)) {
+          socket.emit('error', { message: 'Cannot subscribe to another tenant admin channel' });
+          return;
+        }
+      }
       socket.join(channel);
       socket.emit('subscribed', { channel });
     });

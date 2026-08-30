@@ -157,6 +157,7 @@ export async function createApiServer(): Promise<FastifyInstance> {
   }
 
   // Health check (no auth required)
+  await fastify.register(healthRoutes); // /health, /ready at root when registered without prefix
   await fastify.register(healthRoutes, { prefix: '/api/v1/health' });
 
   // Auth routes (no auth required for telegram login)

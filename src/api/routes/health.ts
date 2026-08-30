@@ -5,6 +5,26 @@ import { getReadiness, isReadyForLive } from '@/observability/readiness';
 import { resolveProcessRole } from '@/config/loader';
 
 export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get('/health', async (_request, reply) => {
+    let database: 'ok' | 'error' = 'ok';
+    let redis: 'ok' | 'error' = 'ok';
+    try { await getPool().query('SELECT 1'); } catch { database = 'error'; }
+    try {
+      const r = getRedisClient();
+      if (typeof (r as { ping?: () => Promise<unknown> }).ping === 'function') {
+        await (r as { ping: () => Promise<unknown> }).ping();
+      }
+    } catch { redis = 'error'; }
+    const prod = process.env.NODE_ENV === 'production';
+    const status = database === 'ok' && (!prod || redis === 'ok') ? 'ok' : 'degraded';
+    reply.status(status === 'ok' ? 200 : 503).send({
+      status,
+      version: process.env.APP_VERSION ?? 'dev',
+      role: process.env.PROCESS_ROLE ?? 'all',
+      dependencies: { database, redis },
+    });
+  });
+
   /** Liveness — process is up */
   fastify.get('/', async (_request, reply) => {
     const checks: Array<{

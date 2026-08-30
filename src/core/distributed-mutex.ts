@@ -59,7 +59,10 @@ export class DistributedMutex {
     this.retryCount = options.retryCount ?? DEFAULT_RETRY_COUNT;
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.keyPrefix = options.keyPrefix ?? process.env.REDIS_KEY_PREFIX ?? 'crash:';
-    this.allowInMemoryFallback = options.allowInMemoryFallback ?? (process.env.ALLOW_INMEMORY_MUTEX === 'true' || (process.env.NODE_ENV ?? 'production') !== 'production');
+    this.allowInMemoryFallback =
+      options.allowInMemoryFallback ??
+      (process.env.ALLOW_INMEMORY_MUTEX === 'true' ||
+        process.env.NODE_ENV !== 'production');
 
     if (options.redisClient) {
       this.redis = options.redisClient;
@@ -158,6 +161,8 @@ export class DistributedMutex {
     }
 
     if (!this.allowInMemoryFallback && !this.redis) {
+      // P0-07: financial coordination must not proceed without Redis in production
+
       return null;
     }
 

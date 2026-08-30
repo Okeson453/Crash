@@ -42,7 +42,8 @@
     "validate:randomness": "node -e \"console.log('Use runRandomnessGate from app with \u226550k rounds')\"",
     "start:automation": "PROCESS_ROLE=automation-worker node dist/index.js",
     "start:mini-game": "PROCESS_ROLE=mini-app-game node dist/index.js",
-    "start:monolith": "PROCESS_ROLE=all node dist/index.js"
+    "start:monolith": "PROCESS_ROLE=all node dist/index.js",
+    "ci": "npm run typecheck && npm run lint && npm test -- --ci --runInBand"
   },
   "keywords": [
     "automation",
@@ -55,7 +56,8 @@
   "license": "UNLICENSED",
   "private": true,
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20 <23",
+    "npm": ">=10"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

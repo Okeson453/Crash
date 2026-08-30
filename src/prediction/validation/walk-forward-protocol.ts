@@ -1,6 +1,6 @@
 /**
- * §24 Validation protocol wrapper — train/val/test/roll-forward metrics
- * against unconditional frequency baseline.
+ * Validation protocol — metrics computed from prediction/outcome pairs only.
+ * No synthetic / hard-coded performance values (P0-08, P0-09, P0-10).
  */
 
 import type { HistoricalRound } from '../types.js';
@@ -16,8 +16,46 @@ export interface ProtocolReport {
   candidate: ModelGateMetrics;
   gate: ReturnType<typeof evaluateModelGate>;
   calibration: ReturnType<typeof validateCalibration>;
+  /** Complete gate: all mandatory checks */
+  passed: boolean;
+  reasons: string[];
   accepted: boolean;
   summary: string;
+}
+
+function logLoss(p: number, y: 0 | 1): number {
+  const pp = Math.min(0.999, Math.max(0.001, p));
+  return y === 1 ? -Math.log(pp) : -Math.log(1 - pp);
+}
+
+function metricsFromPairs(
+  pairs: Array<{ p: number; y: 0 | 1 }>,
+  baselineBrier?: number
+): ModelGateMetrics {
+  const n = pairs.length;
+  if (n === 0) {
+    return { brier: 1, logLoss: 10, ece: 1, oosSkill: 0, sampleSize: 0 };
+  }
+  const brier = pairs.reduce((s, { p, y }) => s + (p - y) ** 2, 0) / n;
+  const ll = pairs.reduce((s, { p, y }) => s + logLoss(p, y), 0) / n;
+  // Simple ECE: 10 bins
+  const bins = Array.from({ length: 10 }, () => ({ n: 0, pSum: 0, ySum: 0 }));
+  for (const { p, y } of pairs) {
+    const i = Math.min(9, Math.floor(p * 10));
+    bins[i].n += 1;
+    bins[i].pSum += p;
+    bins[i].ySum += y;
+  }
+  let ece = 0;
+  for (const b of bins) {
+    if (b.n === 0) continue;
+    ece += (b.n / n) * Math.abs(b.pSum / b.n - b.ySum / b.n);
+  }
+  const oosSkill =
+    baselineBrier != null && baselineBrier > 0
+      ? Math.max(0, (baselineBrier - brier) / baselineBrier)
+      : 0;
+  return { brier, logLoss: ll, ece, oosSkill, sampleSize: n };
 }
 
 export function runValidationProtocol(
@@ -27,59 +65,66 @@ export function runValidationProtocol(
     walkForward?: Partial<WalkForwardConfig>;
   }
 ): ProtocolReport {
+  const reasons: string[] = [];
   const crashPoints = rounds.map((r) => r.crashPoint);
   const randomness = runRandomnessGate(crashPoints, {
     minRounds: opts?.minRounds ?? 50_000,
   });
+  if (randomness.sampleSize < (opts?.minRounds ?? 50_000)) {
+    reasons.push('insufficient_sample');
+  }
 
-  // Lightweight baseline metrics from full series when WF is expensive
-  const binary = crashPoints.map((c) => (c >= 1.3 ? 1 : 0));
-  const baseRate = binary.reduce((a, b) => a + b, 0 as number) / Math.max(1, binary.length);
-  const baseline: ModelGateMetrics = {
-    brier: binary.reduce((s, y) => s + (baseRate - y) ** 2, 0 as number) / Math.max(1, binary.length),
-    logLoss: 0.65,
-    ece: 0.05,
-    oosSkill: 0,
-    sampleSize: binary.length,
-  };
+  const binary = crashPoints.map((c) => (c >= 1.3 ? (1 as const) : (0 as const)));
+  const baseRate =
+    binary.reduce((a, b) => a + b, 0 as number) / Math.max(1, binary.length);
+  const baselinePairs = binary.map((y) => ({ p: baseRate, y }));
+  const baseline = metricsFromPairs(baselinePairs);
 
-  // Candidate = short-window rate as naive competitor skill proxy when full WF not run
+  // Candidate: expanding short-window empirical rate (still computed, not hard-coded)
   const short = binary.slice(-Math.min(500, binary.length));
-  const shortRate = short.reduce((a, b) => a + b, 0 as number) / Math.max(1, short.length);
-  const candidate: ModelGateMetrics = {
-    brier: short.reduce((s, y) => s + (shortRate - y) ** 2, 0 as number) / Math.max(1, short.length),
-    logLoss: 0.6,
-    ece: 0.04,
-    oosSkill: Math.max(0, baseline.brier - short.reduce((s, y) => s + (shortRate - y) ** 2, 0 as number) / Math.max(1, short.length)),
-    sampleSize: short.length,
-    maxDrawdown: 0.05,
-  };
+  const shortRate =
+    short.reduce((a, b) => a + b, 0 as number) / Math.max(1, short.length);
+  const candidatePairs = short.map((y) => ({ p: shortRate, y }));
+  const candidate = metricsFromPairs(candidatePairs, baseline.brier);
 
-  const pairs = short.map((y) => ({ p: shortRate, y: y as 0 | 1 }));
-  const calibration = validateCalibration(pairs);
+  const calibration = validateCalibration(candidatePairs);
+  if (!calibration.passed) reasons.push('calibration_failed');
+
   const gate = evaluateModelGate(candidate, baseline, calibration);
+  if (!gate.allowed) reasons.push('model_gate_failed');
 
   let windows = 0;
-  if (rounds.length >= 5000 && opts?.walkForward) {
+  let walkForwardOk = true;
+  if (rounds.length >= 5000) {
     try {
       const wf = new WalkForwardValidator();
       const result = wf.run(rounds, {
-        trainSize: opts.walkForward.trainSize ?? 2000,
-        valSize: opts.walkForward.valSize ?? 500,
-        testSize: opts.walkForward.testSize ?? 500,
-        stepSize: opts.walkForward.stepSize ?? 500,
-        target: opts.walkForward.target ?? 1.3,
+        trainSize: opts?.walkForward?.trainSize ?? 2000,
+        valSize: opts?.walkForward?.valSize ?? 500,
+        testSize: opts?.walkForward?.testSize ?? 500,
+        stepSize: opts?.walkForward?.stepSize ?? 500,
+        target: opts?.walkForward?.target ?? 1.3,
       });
       windows = result.length;
-    } catch {
-      windows = 0;
+      if (windows === 0) {
+        walkForwardOk = false;
+        reasons.push('walk_forward_empty');
+      }
+    } catch (err) {
+      walkForwardOk = false;
+      reasons.push(`walk_forward_error:${err instanceof Error ? err.message : String(err)}`);
     }
+  } else {
+    reasons.push('walk_forward_skipped_insufficient_rounds');
   }
 
-  const accepted =
-    randomness.sampleSize >= (opts?.minRounds ?? 50_000) &&
+  const passed =
+    reasons.filter((r) => r !== 'walk_forward_skipped_insufficient_rounds').length === 0 &&
     gate.allowed &&
-    calibration.passed;
+    calibration.passed &&
+    walkForwardOk;
+
+  const accepted = passed;
 
   return {
     randomness,
@@ -88,9 +133,11 @@ export function runValidationProtocol(
     candidate,
     gate,
     calibration,
+    passed,
+    reasons,
     accepted,
     summary: accepted
       ? 'PROTOCOL_PASSED'
-      : `PROTOCOL_REJECTED: gate=${gate.allowed} cal=${calibration.passed} rand=${randomness.summary}`,
+      : `PROTOCOL_REJECTED: ${reasons.join(',') || 'unknown'}`,
   };
 }

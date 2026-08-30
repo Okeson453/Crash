@@ -146,8 +146,15 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           return;
         }
         const tokenHash = hashToken(body.refreshToken);
+        // P1-05: atomic compare-and-swap revoke
         const result = await getPool().query(
-          'SELECT id FROM mini_app_refresh_tokens WHERE token_hash=$1 AND user_id=$2 AND revoked_at IS NULL AND expires_at > NOW()',
+          `UPDATE mini_app_refresh_tokens
+           SET revoked_at = NOW()
+           WHERE token_hash = $1
+             AND user_id = $2
+             AND revoked_at IS NULL
+             AND expires_at > NOW()
+           RETURNING user_id`,
           [tokenHash, payload.userId]
         );
         if (result.rows.length === 0) {
@@ -156,10 +163,6 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           });
           return;
         }
-        await getPool().query(
-          'UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE token_hash=$1',
-          [tokenHash]
-        );
         const user = await getTenantManager().findUserById(payload.userId);
         if (!user) {
           reply.status(401).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });

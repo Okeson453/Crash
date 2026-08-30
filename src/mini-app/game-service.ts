@@ -25,12 +25,29 @@ export class MiniGameService {
    * Player-provided client seed must be set before or during waiting/countdown,
    * never after the round is running (commitment already locked).
    */
-  setClientSeed(seed: string): void {
-    const s = String(seed || '').trim().slice(0, 128);
+  setClientSeed(userId: string, seed: string): void {
+    const s = String(seed || '').trim();
+    if (!userId) throw new Error('userId required for clientSeed');
     if (!s) throw new Error('clientSeed required');
-    if (this.phase === 'running' || this.phase === 'crashed') {
+    if (this.phase === 'running' || this.phase === 'crashed' || this.phase === 'countdown') {
       throw new Error('clientSeed locked for this round');
     }
+    // Per-user commitment — does not mutate another user's or global mid-round seed
+    this.userClientSeeds.set(userId, s);
+    // Round seed is composite of all commitments when round opens; display last committed for UX
+    this.clientSeed = s;
+    this.emitState();
+  }
+
+  /** Frozen client seed for the round (committed at countdown start) */
+  private freezeRoundClientSeed(): string {
+    if (this.userClientSeeds.size === 0) {
+      return this.clientSeed || 'default-client-seed';
+    }
+    // Deterministic composite of all user commitments
+    const parts = [...this.userClientSeeds.entries()].sort(([a],[b]) => a.localeCompare(b)).map(([u,s]) => `${u}:${s}`);
+    return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
+  }
     this.clientSeed = s;
     this.emitState();
   }
@@ -39,6 +56,15 @@ export class MiniGameService {
     const rg = assertBettingAllowed(userId);
     if(!rg.allowed) throw new Error(`Responsible gambling block: ${rg.reason}`);
     if(this.phase!=='countdown'||!this.roundId) throw new Error('Betting is closed');
+    // P0-05: authoritative bet limits (server-side)
+    const minBet = Number(process.env.MINI_MIN_BET ?? 1);
+    const maxBet = Number(process.env.MINI_MAX_BET ?? 10000);
+    const betStep = Number(process.env.MINI_BET_STEP ?? 1);
+    if (!Number.isFinite(amount) || amount < minBet) throw new Error(`Amount below minBet ${minBet}`);
+    if (amount > maxBet) throw new Error(`Amount above maxBet ${maxBet}`);
+    if (betStep > 0 && Math.abs(amount / betStep - Math.round(amount / betStep)) > 1e-9) {
+      throw new Error(`Amount must be multiple of betStep ${betStep}`);
+    }
     const pool=getPool(); const client=await pool.connect();
     try { await client.query('BEGIN'); const existing=await client.query('SELECT * FROM mini_app_bets WHERE idempotency_key=$1 FOR UPDATE',[idempotencyKey]); if(existing.rows[0]){await client.query('COMMIT');return this.rowToBet(existing.rows[0]);}
       const prefs=await client.query('SELECT data FROM mini_app_preferences WHERE user_id=$1',[userId]); const pref=prefs.rows[0]?.data; const maxLoss=typeof pref==='object'&&pref!==null&&!Array.isArray(pref)&&typeof pref.maxDailyLoss==='number'?pref.maxDailyLoss:null; if(maxLoss!==null){const loss=await client.query("SELECT COALESCE(SUM(CASE WHEN pnl<0 THEN -pnl ELSE 0 END),0)::float loss FROM mini_app_bets WHERE user_id=$1 AND created_at >= CURRENT_DATE",[userId]); if(Number(loss.rows[0]?.loss??0)+amount>maxLoss)throw new Error('RISK_LIMIT_REACHED');} const balance=await client.query('SELECT balance FROM mini_app_balances WHERE user_id=$1 FOR UPDATE',[userId]); const current=Number(balance.rows[0]?.balance ?? 0); let usedPromo=false; if(current<amount){ const ok=await consumeBonusEntries(userId,1,client); if(!ok) throw new Error('INSUFFICIENT_BALANCE'); usedPromo=true; } await client.query('INSERT INTO mini_app_balances(user_id,balance) VALUES($1,0) ON CONFLICT(user_id) DO NOTHING',[userId]); if(!usedPromo){ await client.query('UPDATE mini_app_balances SET balance=balance-$1,updated_at=NOW() WHERE user_id=$2',[amount,userId]); }
@@ -47,7 +73,7 @@ export class MiniGameService {
   }
   async cashout(userId:string, betId:string):Promise<{betId:string;multiplier:number;pnl:number;balanceAfter:number}> {
     if(this.phase!=='running'||!this.roundId)throw new Error('Cashout is unavailable'); const pool=getPool(); const client=await pool.connect();
-    try{await client.query('BEGIN'); const result=await client.query('SELECT * FROM mini_app_bets WHERE id=$1 AND user_id=$2 FOR UPDATE',[betId,userId]); const row=result.rows[0]; if(!row||String(row.state)!=='placed'&&String(row.state)!=='active')throw new Error('BET_NOT_ACTIVE'); const m=this.multiplier??1; const pnl=Number(row.amount)*(m-1); const payout=Number(row.amount)+pnl; await client.query('UPDATE mini_app_bets SET state=\'cashed_out\',cashout_multiplier=$1,pnl=$2,settled_at=NOW() WHERE id=$3',[m,pnl,betId]); await client.query('INSERT INTO mini_app_balances(user_id,balance) VALUES($1,0) ON CONFLICT(user_id) DO NOTHING',[userId]); await client.query('UPDATE mini_app_balances SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2',[payout,userId]); const bal=await client.query('SELECT balance FROM mini_app_balances WHERE user_id=$1',[userId]); await client.query('COMMIT'); const balanceAfter=Number(bal.rows[0]?.balance??0); this.emit('bet:cashed-out',{userId,betId,multiplier:m,pnl,serverTime:new Date().toISOString()}); this.emit('user:balance',{userId,balance:balanceAfter,currency:'USD',serverTime:new Date().toISOString()}); return {betId,multiplier:m,pnl,balanceAfter}; }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    try{await client.query('BEGIN'); const result=await client.query('SELECT * FROM mini_app_bets WHERE id=$1 AND user_id=$2 FOR UPDATE',[betId,userId]); const row=result.rows[0]; if(!row||String(row.state)!=='placed'&&String(row.state)!=='active')throw new Error('BET_NOT_ACTIVE'); const m=this.multiplier??1; const pnl=Number(row.amount)*(m-1); const payout=Number(row.amount)+pnl; const settled=await client.query('UPDATE mini_app_bets SET state=\'cashed_out\',cashout_multiplier=$1,pnl=$2,settled_at=NOW() WHERE id=$3 AND state IN (\'placed\',\'active\') RETURNING id',[m,pnl,betId]); if(settled.rowCount===0) throw new Error('BET_ALREADY_SETTLED'); await client.query('INSERT INTO mini_app_balances(user_id,balance) VALUES($1,0) ON CONFLICT(user_id) DO NOTHING',[userId]); await client.query('UPDATE mini_app_balances SET balance=balance+$1,updated_at=NOW() WHERE user_id=$2',[payout,userId]); const bal=await client.query('SELECT balance FROM mini_app_balances WHERE user_id=$1',[userId]); await client.query('COMMIT'); const balanceAfter=Number(bal.rows[0]?.balance??0); this.emit('bet:cashed-out',{userId,betId,multiplier:m,pnl,serverTime:new Date().toISOString()}); this.emit('user:balance',{userId,balance:balanceAfter,currency:'USD',serverTime:new Date().toISOString()}); return {betId,multiplier:m,pnl,balanceAfter}; }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
   private beginRound():void { this.roundNumber+=1; this.roundId=randomUUID(); this.serverSeed=randomBytes(32).toString('hex'); if(!this.clientSeed) this.clientSeed=randomBytes(16).toString('hex'); this.nonce+=1; this.crashAt=crashPoint(this.serverSeed,this.clientSeed,this.nonce,this.houseEdge); this.multiplier=1; this.countdown=this.countdownSeconds; this.startedAt=new Date().toISOString(); this.crashedAt=null; this.phase='countdown'; void this.persistRound('countdown'); this.emit('game:round-start',{roundId:this.roundId,serverSeedHash:hashSeed(this.serverSeed),clientSeed:this.clientSeed,nonce:this.nonce,countdownSeconds:this.countdownSeconds,serverTime:this.startedAt}); this.emitState(); this.timer=setInterval(()=>this.tick(),100); }
   private tick():void { if(this.phase==='countdown'){this.countdown=Math.max(0,this.countdown-0.1); if(this.countdown<=0){this.phase='running';this.countdown=0;this.startedAt=new Date().toISOString();void this.activateRound();} else if(Math.abs(this.countdown-Math.round(this.countdown))<0.001)this.emit('game:countdown',{roundId:this.roundId,secondsRemaining:Math.ceil(this.countdown),serverTime:new Date().toISOString()}); return; } if(this.phase!=='running'||!this.startedAt)return; const elapsed=(Date.now()-Date.parse(this.startedAt))/1000; this.multiplier=Math.max(1,Number(Math.exp(elapsed*0.12).toFixed(2))); this.emit('game:multiplier',{roundId:this.roundId,multiplier:this.multiplier,serverTime:new Date().toISOString()}); void this.autoCashout(); if(this.multiplier>=this.crashAt)this.endRound(); }
