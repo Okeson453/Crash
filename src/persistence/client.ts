@@ -5,6 +5,9 @@ import { withRetry } from '../utils/retry';
 export interface DatabaseConfig {
   connectionString: string;
   poolSize?: number;
+  idleTimeoutMillis?: number;
+  connectionTimeoutMillis?: number;
+  queryTimeoutMillis?: number;
 }
 
 let pool: Pool | null = null;
@@ -28,9 +31,9 @@ export function createPool(config: DatabaseConfig): Pool {
 
   pool = new Pool({
     connectionString: config.connectionString,
-    max: config.poolSize ?? 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
+    max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? process.env.DB_POOL_SIZE ?? 10),
+    idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
+    connectionTimeoutMillis: config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
     ...(ssl !== undefined ? { ssl } : {}),
   });
 
@@ -41,7 +44,7 @@ export function createPool(config: DatabaseConfig): Pool {
   // Do NOT run concurrent client.query() in the connect handler — that races the
   // consumer's first query. Tenant GUCs are applied in withTenantContext / query paths.
   pool.on('connect', (client) => {
-    const timeoutMs = Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15000);
+    const timeoutMs = config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000);
     void client.query(`SET statement_timeout = ${timeoutMs}`).catch(() => undefined);
     getLogger().debug({ component: 'Database', statementTimeoutMs: timeoutMs }, 'New database connection established');
   });

@@ -104,6 +104,9 @@ export const BrowserConfigSchema = z.object({
 
 export const PersistenceConfigSchema = z.object({
   databasePoolSize: z.number().int().positive().default(10),
+  idleTimeoutMillis: z.number().int().positive().default(30_000),
+  connectionTimeoutMillis: z.number().int().positive().default(5_000),
+  queryTimeoutMillis: z.number().int().positive().default(15_000),
   redisCommandTimeoutMs: z.number().int().positive().default(5000),
   redisReconnectIntervalMs: z.number().int().positive().default(3000),
 });

@@ -214,22 +214,46 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   // === Design-concept admin extensions (stubs with safe defaults) ===
 
   fastify.get('/overview', async (_request, reply) => {
-    const state = miniGameService.getState();
-    const isRunning = state.phase === 'running' || state.phase === 'countdown';
-    reply.send({
-      data: {
-        totalRounds: Number((state as { totalRounds?: number }).totalRounds ?? 0),
-        activePlayers: Number((state as { activePlayers?: number }).activePlayers ?? 0),
-        revenue24h: 0,
-        profit24h: Number((state as { totalPnl?: number }).totalPnl ?? 0),
-        totalBets: Number((state as { totalBets?: number }).totalBets ?? 0),
-        totalPnl: Number((state as { totalPnl?: number }).totalPnl ?? 0),
-        revenueChart: [],
-        latestAlerts: isRunning
-          ? []
-          : [{ name: 'Engine', status: 'degraded' as const, message: `Phase: ${state.phase}` }],
-      },
-    });
+    try {
+      const pool = getPool();
+      const state = miniGameService.getState();
+      const users = await pool.query(`SELECT COUNT(*)::int AS n FROM users`);
+      const openBets = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM mini_app_bets WHERE state IN ('placed','active','pending')`
+      );
+      const pnl = await pool.query(
+        `SELECT COALESCE(SUM(pnl),0)::float8 AS pnl FROM mini_app_bets
+         WHERE settled_at > NOW() - INTERVAL '24 hours'`
+      );
+      const rounds = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM mini_app_rounds WHERE created_at > NOW() - INTERVAL '24 hours'`
+      ).catch(() => ({ rows: [{ n: 0 }] }));
+      const isRunning = state.phase === 'running' || state.phase === 'countdown';
+      reply.send({
+        data: {
+          users: users.rows[0]?.n ?? 0,
+          openBets: openBets.rows[0]?.n ?? 0,
+          pnl24h: Number(pnl.rows[0]?.pnl ?? 0),
+          totalRounds: Number(rounds.rows[0]?.n ?? 0),
+          activePlayers: openBets.rows[0]?.n ?? 0,
+          revenue24h: 0,
+          profit24h: Number(pnl.rows[0]?.pnl ?? 0),
+          totalBets: openBets.rows[0]?.n ?? 0,
+          totalPnl: Number(pnl.rows[0]?.pnl ?? 0),
+          revenueChart: [],
+          gamePhase: state.phase,
+          roundId: state.roundId,
+          serverTime: state.serverTime,
+          latestAlerts: isRunning
+            ? []
+            : [{ name: 'Engine', status: 'degraded' as const, message: `Phase: ${state.phase}` }],
+        },
+      });
+    } catch (err) {
+      reply.status(500).send({
+        error: { code: 'OVERVIEW_FAILED', message: err instanceof Error ? err.message : String(err) },
+      });
+    }
   });
 
   fastify.post('/users/:id/suspend', { preHandler: requireRole('admin') }, async (request, reply) => {
@@ -253,16 +277,29 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data: { id, role: body.role } });
   });
 
-  fastify.get('/activity', async (_request, reply) => {
-    reply.send({ data: [] });
-  });
+  /* /activity implemented below with audit_logs */
 
   fastify.get('/rounds', async (request, reply) => {
     const query = paginationSchema.parse(request.query);
-    reply.send({
-      data: [],
-      pagination: { cursor: null, hasMore: false, limit: query.limit },
-    });
+    try {
+      const r = await getPool().query(
+        `SELECT id, crash_point, phase, created_at, settled_at
+         FROM mini_app_rounds
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [query.limit ?? 50]
+      );
+      reply.send({
+        data: r.rows,
+        pagination: {
+          cursor: r.rows.length === query.limit ? String(r.rows.at(-1)?.id ?? '') : null,
+          hasMore: r.rows.length === query.limit,
+          limit: query.limit,
+        },
+      });
+    } catch {
+      reply.send({ data: [], pagination: { cursor: null, hasMore: false, limit: query.limit } });
+    }
   });
 
   fastify.get('/billing/subscription', async (_request, reply) => {
@@ -480,35 +517,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  fastify.get('/overview', async (_request, reply) => {
-    try {
-      const pool = getPool();
-      const users = await pool.query(`SELECT COUNT(*)::int AS n FROM users`);
-      const openBets = await pool.query(
-        `SELECT COUNT(*)::int AS n FROM mini_app_bets WHERE state IN ('placed','active','pending')`
-      );
-      const pnl = await pool.query(
-        `SELECT COALESCE(SUM(pnl),0)::float8 AS pnl FROM mini_app_bets
-         WHERE settled_at > NOW() - INTERVAL '24 hours'`
-      );
-      const state = miniGameService.getState();
-      reply.send({
-        data: {
-          users: users.rows[0]?.n ?? 0,
-          openBets: openBets.rows[0]?.n ?? 0,
-          pnl24h: Number(pnl.rows[0]?.pnl ?? 0),
-          gamePhase: state.phase,
-          roundId: state.roundId,
-          serverTime: state.serverTime,
-        },
-      });
-    } catch (err) {
-      reply.status(500).send({
-        error: { code: 'OVERVIEW_FAILED', message: err instanceof Error ? err.message : String(err) },
-      });
-    }
-  });
-
+  
   fastify.get('/config/history', async (_request, reply) => {
     reply.send({ data: configHistory.slice(-50).reverse() });
   });

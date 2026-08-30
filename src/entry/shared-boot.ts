@@ -22,7 +22,13 @@ export function bootPersistence(config: AppConfig, opts?: { requireRedis?: boole
     throw new Error('DATABASE_URL is required');
   }
   const poolSize = resolveDatabasePoolSize(config);
-  createPool({ connectionString: databaseUrl, poolSize });
+  createPool({
+    connectionString: databaseUrl,
+    poolSize,
+    idleTimeoutMillis: config.persistence?.idleTimeoutMillis,
+    connectionTimeoutMillis: config.persistence?.connectionTimeoutMillis,
+    queryTimeoutMillis: config.persistence?.queryTimeoutMillis,
+  });
   getLogger().info({ component: 'Boot', poolSize, role: resolveProcessRole(config) }, 'Database pool sized');
 
   const redisUrl = process.env.REDIS_URL;

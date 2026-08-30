@@ -83,6 +83,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   persistence: {
     databasePoolSize: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+    queryTimeoutMillis: 15_000,
     redisCommandTimeoutMs: 5000,
     redisReconnectIntervalMs: 3000,
   },

@@ -36,6 +36,7 @@ import { PredictionEngine } from '../prediction/prediction-engine';
 import { HistoricalDataService } from '../prediction/historical-data-service';
 import { PredictionRepository } from '../persistence/repositories/prediction-repo';
 import { RiskEngine } from '../betting/risk-engine';
+import { assertNoMockAdapterInProduction } from '../betting/adapters/browser';
 import { getPredictionRuntime } from '../prediction/runtime/prediction-runtime';
 import { BettingCoordinator } from '../betting/betting-coordinator';
 import { RiskStateProvider } from '../betting/risk-state-provider';
@@ -232,6 +233,8 @@ export function composeApplication(
   }
 
   const riskEngine = new RiskEngine();
+  // Live adapters must not be Mock in production (assert at LiveBetExecutor bind)
+
   const platformRuntime = getPredictionRuntime('platform');
   // Snapshot key: crash:prediction:stack:v2:platform (see prediction-runtime.ts)
 
