@@ -119,6 +119,14 @@ export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        await getRedisClient().ping();
+      } catch {
+        reply.status(503).send({ status: 'not_ready', reason: 'redis_unavailable' });
+        return;
+      }
+    }
     if (needsPrediction && live && !isReadyForLive()) {
       reply.status(503).send({
         data: {
