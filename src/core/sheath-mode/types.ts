@@ -26,7 +26,10 @@ export type SheathTriggerId =
   | 'risk_thresholds'
   | 'system_health_degradation'
   | 'queue_backlog'
-  | 'operator_command';
+  | 'operator_command'
+  | 'prediction_divergence'
+  | 'prediction_calibration_degraded'
+  | 'prediction_cold_state';
 
 export interface SheathTrigger {
   id: SheathTriggerId;

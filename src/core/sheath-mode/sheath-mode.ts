@@ -245,4 +245,73 @@ export class SheathMode extends EventEmitter {
     if (triggers.some((t) => t.severity === 'medium')) return 'medium';
     return null;
   }
+  /**
+   * Integrate live prediction divergence / calibration health (design §25–26).
+   * Level 3+ → high severity evaluating; level 5 → critical immediate active.
+   */
+  reportPredictionHealth(input: {
+    divergenceLevel: number;
+    ece?: number;
+    reason?: string;
+    coldState?: boolean;
+  }): void {
+    const triggers: SheathTrigger[] = [];
+    const now = new Date().toISOString();
+    if (input.coldState) {
+      triggers.push({
+        id: 'prediction_cold_state',
+        severity: 'critical',
+        message: 'Prediction stack cold — live entries blocked',
+        detectedAt: now,
+        metadata: { coldState: true },
+      });
+    }
+    if (input.ece != null && input.ece > 0.08) {
+      triggers.push({
+        id: 'prediction_calibration_degraded',
+        severity: input.ece > 0.12 ? 'critical' : 'high',
+        message: `Calibration ECE=${input.ece.toFixed(3)} above budget`,
+        detectedAt: now,
+        metadata: { ece: input.ece },
+      });
+    }
+    if (input.divergenceLevel >= 5) {
+      triggers.push({
+        id: 'prediction_divergence',
+        severity: 'critical',
+        message: input.reason ?? `Divergence level ${input.divergenceLevel}`,
+        detectedAt: now,
+        metadata: { level: input.divergenceLevel },
+      });
+    } else if (input.divergenceLevel >= 3) {
+      triggers.push({
+        id: 'prediction_divergence',
+        severity: 'high',
+        message: input.reason ?? `Divergence level ${input.divergenceLevel}`,
+        detectedAt: now,
+        metadata: { level: input.divergenceLevel },
+      });
+    } else if (input.divergenceLevel >= 1) {
+      triggers.push({
+        id: 'poor_prediction_accuracy',
+        severity: 'medium',
+        message: input.reason ?? `Divergence level ${input.divergenceLevel}`,
+        detectedAt: now,
+        metadata: { level: input.divergenceLevel },
+      });
+    }
+    if (triggers.length > 0) this.reportTriggers(triggers);
+  }
+
+  /** Prediction-driven soft suspend (divergence full sheath) without full state machine */
+  isPredictionEntriesBlocked(): boolean {
+    return (
+      this.activeTriggers.some(
+        (t) =>
+          (t.id === 'prediction_divergence' && t.severity === 'critical') ||
+          t.id === 'prediction_cold_state'
+      ) || this.isBettingSuspended()
+    );
+  }
+
 }

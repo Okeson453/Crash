@@ -29,6 +29,16 @@ import {
 import { predictionHotCache } from '../observability/performance/hot-cache.js';
 import { globalCalibrationState } from './calibration/calibration-state.js';
 import { globalIncrementalFeatures } from './features/incremental-features.js';
+import { globalIncrementalState } from './state/incremental-state-engine.js';
+import {
+  runPredictionPipeline,
+  feedbackPredictionPipeline,
+} from './prediction-pipeline.js';
+import { globalProductionController } from './lifecycle/production-controller.js';
+import { globalLearningScheduler } from './learning/learning-scheduler.js';
+import { assertPredictionWarmForLive } from './prewarm.js';
+import type { SheathMode } from '../core/sheath-mode/index.js';
+
 import { PredictionStateRegistry, type PredictionStateSnapshot } from './state-snapshot.js';
 
 export interface EntryDecisionContext {
@@ -63,6 +73,8 @@ export class EntryDecisionService {
   private readonly stateRegistry: PredictionStateRegistry;
   private lastStateSnapshot: PredictionStateSnapshot;
   private lastEmittedProbability: number | null = null;
+  private sheathMode: SheathMode | null = null;
+  private usePipeline = true;
 
   constructor(opts?: {
     predictionEngine?: PredictionEngine;
@@ -72,6 +84,8 @@ export class EntryDecisionService {
     roundRepo?: RoundRepository;
     acie?: ACIEEngine;
     preferAcie?: boolean;
+    sheathMode?: SheathMode | null;
+    usePipeline?: boolean;
   }) {
     this.predictionEngine = opts?.predictionEngine ?? new PredictionEngine();
     this.historicalData =
@@ -81,6 +95,8 @@ export class EntryDecisionService {
     this.predictionRepo = opts?.predictionRepo ?? new InMemoryPredictionRepository();
     this.acie = opts?.acie ?? new ACIEEngine();
     this.preferAcie = opts?.preferAcie ?? true;
+    this.sheathMode = opts?.sheathMode ?? null;
+    this.usePipeline = opts?.usePipeline ?? true;
     this.stateRegistry = new PredictionStateRegistry();
     this.lastStateSnapshot = this.stateRegistry.snapshot();
   }
@@ -116,13 +132,19 @@ export class EntryDecisionService {
     globalIncrementalFeatures.onCrash(crashPoint);
     // Phase 4: feed last emitted probability into calibration (if present on snapshot)
     try {
+      const actual: 0 | 1 = crashPoint >= 1.3 ? 1 : 0;
       if (this.lastEmittedProbability != null && this.lastEmittedProbability > 0) {
-        globalCalibrationState.observe(
-          this.lastEmittedProbability,
-          crashPoint >= 1.3 ? 1 : 0,
-          'global'
-        );
+        globalCalibrationState.observe(this.lastEmittedProbability, actual, 'global');
+        feedbackPredictionPipeline(this.lastEmittedProbability, actual);
       }
+      globalLearningScheduler.tick();
+      const prod = globalProductionController.status();
+      this.sheathMode?.reportPredictionHealth({
+        divergenceLevel: prod.divergence.level,
+        ece: prod.divergence.eceProxy,
+        reason: prod.divergence.reason,
+        coldState: !globalIncrementalState.isWarm(30),
+      });
     } catch { /* non-critical */ }
     const result = this.acie.onCrash(
       {
@@ -252,8 +274,16 @@ export class EntryDecisionService {
             'ACIE strategy: no entry opportunity'
           );
         }
+
+        // Phase 4–8 pipeline: calibration, meta, multi-target, opportunity, thresholds, sheath
+        if (this.usePipeline && signal) {
+          signal = this.applyPipelineToSignal(signal, acieEval, ctx);
+        }
       } else if (legacy) {
         signal = legacy;
+        if (this.usePipeline && signal) {
+          signal = this.applyPipelineToSignal(signal, null, ctx);
+        }
       }
 
       if (
@@ -307,6 +337,37 @@ export class EntryDecisionService {
     // ACIE SKIP → do not present signal as acceptable opportunity
     if (acieEval && !acieEval.signal && this.preferAcie) {
       riskInput.predictionSignal = undefined;
+    }
+
+    // Live warm-state gate (design §21)
+    if (ctx.riskInput.mode === 'live') {
+      try {
+        assertPredictionWarmForLive(40);
+      } catch (err) {
+        this.logger.warn(
+          { component: 'EntryDecisionService', error: String(err) },
+          'LIVE blocked — prediction stack cold'
+        );
+        this.sheathMode?.reportPredictionHealth({ divergenceLevel: 0, coldState: true });
+        riskInput.predictionSignal = undefined;
+        signal = null;
+      }
+    }
+
+    // Production / divergence sheath may block entries (design §25–26)
+    {
+      const prodStatus = globalProductionController.status();
+      if (!prodStatus.entriesAllowed || this.sheathMode?.isPredictionEntriesBlocked()) {
+        this.logger.info(
+          {
+            component: 'EntryDecisionService',
+            divergenceLevel: prodStatus.divergence.level,
+            sheath: this.sheathMode?.getState(),
+          },
+          'Entries blocked by prediction sheath / divergence'
+        );
+        riskInput.predictionSignal = undefined;
+      }
     }
 
     timer.mark('pre_risk');
@@ -374,6 +435,71 @@ export class EntryDecisionService {
       );
       this.acieSeeded = true;
     }
+  }
+
+
+  /**
+   * Apply Phase 4–8 pipeline on top of ACIE/legacy signal:
+   * ensemble + meta + calibration + multi-target + opportunity + dynamic threshold.
+   */
+  private applyPipelineToSignal(
+    signal: PredictionSignal,
+    acieEval: CrashLearningResult['evaluation'] | null,
+    ctx: EntryDecisionContext
+  ): PredictionSignal {
+    const regime = String(acieEval?.regime ?? signal.regimeId ?? 'normal');
+    const pipeline = runPredictionPipeline({
+      baseProbability: signal.probability,
+      regime,
+      regimeConfidence: Math.min(1, this.acie.historySize() / 200),
+      dataQuality: signal.dataQuality,
+      bankroll: ctx.riskInput.currentBalance ?? 0,
+      baseThreshold: 0.58,
+      predictionId: signal.predictionId,
+      featureVersion: signal.featureVersion,
+      modelVersion: signal.modelVersion,
+    });
+
+    const target = pipeline.targetSelection.selected.target as ThresholdTarget;
+    const expires = signal.expiresAt;
+    const reasoning = Object.freeze([
+      ...signal.reasoning,
+      pipeline.reason,
+      pipeline.targetSelection.reason,
+      `threshold=${pipeline.threshold.toFixed(3)} (${pipeline.thresholdReason})`,
+      `metaP=${pipeline.metaProbability.toFixed(3)}`,
+      `oppScore=${pipeline.opportunity.score.toFixed(4)}`,
+    ]);
+
+    // Pipeline SKIP / sheath → zero opportunity for risk layer
+    const probability = pipeline.calibratedProbability;
+    const confidence = pipeline.opportunity.confidence;
+
+    return {
+      predictionId: pipeline.predictionId || signal.predictionId,
+      timestamp: signal.timestamp,
+      modelVersion: signal.modelVersion,
+      featureVersion: signal.featureVersion,
+      target,
+      score: probability,
+      probability,
+      confidence,
+      regimeId: regime,
+      dataQuality: signal.dataQuality,
+      reasoning,
+      expiresAt: expires,
+      featureSummary: Object.freeze({
+        ...signal.featureSummary,
+        metaProbability: pipeline.metaProbability,
+        rawPipelineProbability: pipeline.rawProbability,
+        opportunityScore: pipeline.opportunity.score,
+        opportunityRank: pipeline.opportunity.rank,
+        pipelineThreshold: pipeline.threshold,
+        selectedTarget: target,
+        shrunkEV: pipeline.targetSelection.selected.shrunkEV,
+        divergenceLevel: pipeline.production.divergence.level,
+      }),
+    };
   }
 
   private persistAsync(

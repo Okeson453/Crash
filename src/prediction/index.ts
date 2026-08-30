@@ -41,3 +41,7 @@ export { ConceptDriftMonitor, globalConceptDrift } from './drift/concept-drift.j
 export { ModelLifecycleManager, globalModelLifecycle } from './lifecycle/model-lifecycle.js';
 export { ProductionController, globalProductionController } from './lifecycle/production-controller.js';
 export { runPredictionPipeline, feedbackPredictionPipeline } from './prediction-pipeline.js';
+
+export { LearningScheduler, globalLearningScheduler } from './learning/learning-scheduler.js';
+export type { PredictionGeneratedEvent } from './events/prediction-event.js';
+export { buildPredictionGeneratedEvent } from './events/prediction-event.js';

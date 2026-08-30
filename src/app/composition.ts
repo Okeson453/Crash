@@ -219,12 +219,15 @@ export function composeApplication(
   const historicalDataService = new HistoricalDataService(roundRepo);
   let predictionRepo: PredictionRepository | undefined;
   try { predictionRepo = new PredictionRepository(pool); } catch { predictionRepo = undefined; }
+  const sheathMode = new SheathMode();
   const entryDecisionService = new EntryDecisionService({
     predictionEngine,
     historicalData: historicalDataService,
     riskEngine,
     predictionRepo,
     roundRepo,
+    sheathMode,
+    usePipeline: true,
   });
 
   const dailyCounter = new DailyEntryCounter(config.betting?.dayBoundaryTimezone ?? 'UTC');
@@ -264,7 +267,6 @@ export function composeApplication(
     },
   });
 
-  const sheathMode = new SheathMode();
   const opportunityRanker = new OpportunityRanker();
   const decisionEngine = new DecisionEngine({ ranker: opportunityRanker, sheathMode, baseEnterThreshold: 0.42 });
   const featureStore = new FeatureStore();
@@ -344,7 +346,15 @@ export function composeApplication(
     if (config.system.mode === 'maintenance') return;
 
     try {
-      const warm = await prewarmPredictionStack(entryDecisionService, 200);
+      const warm = await prewarmPredictionStack(entryDecisionService, 500);
+      logger.info(
+        {
+          component: 'Composition',
+          ...warm,
+          liveReady: warm.stateWarm && warm.acieHistorySize >= 20,
+        },
+        'Prediction prewarm complete'
+      );
       logger.info({ component: 'Composition', ...warm }, 'Prediction stack pre-warmed');
     } catch (err) {
       logger.warn({ component: 'Composition', error: String(err) }, 'Pre-warm failed');

@@ -10,6 +10,8 @@ import { globalIncrementalState } from './state/incremental-state-engine.js';
 import { globalCalibrationState } from './calibration/calibration-state.js';
 import { featureHotCache } from '../observability/performance/hot-cache.js';
 import { globalFeatureEngineV2 } from './features/feature-engine-v2.js';
+import { globalModelLifecycle } from './lifecycle/model-lifecycle.js';
+
 
 export interface PrewarmResult {
   historyRounds: number;
@@ -59,6 +61,28 @@ export async function prewarmPredictionStack(
       'ACIE prewarm partial'
     );
   }
+
+  // Register baseline production model for lifecycle/canary routing
+  try {
+    if (!globalModelLifecycle.get('acie', 'v3')) {
+      globalModelLifecycle.register({
+        modelName: 'acie',
+        modelVersion: 'v3',
+        stage: 'PRODUCTION',
+        trafficShare: 1,
+        metrics: { ece: 0.05, brier: 0.22, logLoss: 0.55, oosSkill: 0 },
+      });
+    }
+    if (!globalModelLifecycle.get('meta', 'lr-v1')) {
+      globalModelLifecycle.register({
+        modelName: 'meta',
+        modelVersion: 'lr-v1',
+        stage: 'SHADOW',
+        trafficShare: 0,
+        metrics: {},
+      });
+    }
+  } catch { /* ignore */ }
 
   const durationMs = performance.now() - t0;
   const result: PrewarmResult = {

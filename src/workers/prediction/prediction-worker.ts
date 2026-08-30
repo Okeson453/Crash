@@ -16,6 +16,9 @@ import { scoreCandidates } from '../../prediction/models/candidate-models';
 import { globalIncrementalState } from '../../prediction/state/incremental-state-engine';
 import { getLogger } from '../../observability/logger';
 import { randomUUID } from 'crypto';
+import { buildPredictionGeneratedEvent } from '../../prediction/events/prediction-event';
+import { runPredictionPipeline } from '../../prediction/prediction-pipeline';
+
 
 export interface PredictionWorkerDeps {
   entryDecisionService?: EntryDecisionService;
@@ -74,7 +77,6 @@ export class PredictionWorker extends BaseWorker {
     let regime = 'normal';
     let modelVersion = 'incremental-ewma';
     let strategyAction: 'ENTRY' | 'REDUCED_ENTRY' | 'SKIP' = 'SKIP';
-    let stake = 0;
     let reason = 'baseline-incremental';
 
     const eds = this.deps.entryDecisionService;
@@ -94,7 +96,6 @@ export class PredictionWorker extends BaseWorker {
         modelVersion = 'acie-v3';
         if (evaluation.strategy.isOpportunity) {
           strategyAction = evaluation.strategy.action === 'REDUCED_ENTRY' ? 'REDUCED_ENTRY' : 'ENTRY';
-          stake = evaluation.strategy.stake;
           reason = evaluation.strategy.reason;
         } else {
           strategyAction = 'SKIP';
@@ -135,39 +136,57 @@ export class PredictionWorker extends BaseWorker {
     const ensemble = globalEnsemble.combine(ensembleScores);
     rawProbability = 0.55 * rawProbability + 0.45 * ensemble.probability;
 
-    const calibratedProbability = globalCalibrationState.calibrateWithShrinkage(
+    let calibratedProbability = globalCalibrationState.calibrateWithShrinkage(
       rawProbability,
       regime,
       snap.ewmaHit13,
       snap.count
     );
 
-    const latencyMs = performance.now() - t0;
-    const predictionId = randomUUID();
+    const pipeline = runPredictionPipeline({
+      baseProbability: rawProbability,
+      regime,
+      dataQuality: Math.min(1, snap.count / 100),
+      bankroll: Number(p.balance ?? 0),
+      featureVersion: features.featureVersion,
+      modelVersion,
+    });
+    calibratedProbability = pipeline.calibratedProbability;
+    if (pipeline.action !== 'SKIP') {
+      strategyAction = pipeline.action;
+      reason = pipeline.reason; // retained for logs
+    } else if (!eds) {
+      strategyAction = 'SKIP';
+      reason = pipeline.reason; // retained for logs
+    }
+    const target = pipeline.targetSelection.selected.target;
 
-    const eventPayload = {
+    const latencyMs = performance.now() - t0;
+    const predictionId = pipeline.predictionId || randomUUID();
+
+    const eventPayload = buildPredictionGeneratedEvent({
       predictionId,
       roundId,
-      tenantId: p.tenantId ?? null,
+      tenantId: p.tenantId != null ? String(p.tenantId) : null,
       modelVersion,
       featureVersion: features.featureVersion,
       regimeVersion: regime,
       calibrationVersion: globalCalibrationState.version,
-      target: 1.3,
-      rawProbability,
+      target,
+      rawProbability: pipeline.rawProbability,
       calibratedProbability,
       confidence,
-      expectedValue: calibratedProbability * 1.3 - 1,
+      expectedValue: pipeline.targetSelection.selected.shrunkEV,
       featureHash,
       timestamp: new Date().toISOString(),
       latencyMs,
       action: strategyAction,
-      stake,
-      reason,
+      opportunityScore: pipeline.opportunity.score,
+      opportunityRank: pipeline.opportunity.rank,
+      metaProbability: pipeline.metaProbability,
       agreement: ensemble.agreement,
-      calibrationMetrics: globalCalibrationState.metrics(),
-      workerName: this.name,
-    };
+      threshold: pipeline.threshold,
+    });
 
     try {
       await getEventBus().emit({
@@ -182,7 +201,7 @@ export class PredictionWorker extends BaseWorker {
     }
 
     this.log.debug(
-      { component: 'PredictionWorker', predictionId, latencyMs, calibratedProbability },
+      { component: 'PredictionWorker', predictionId, latencyMs, calibratedProbability, reason },
       'PredictionGenerated'
     );
   }
