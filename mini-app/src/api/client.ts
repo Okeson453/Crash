@@ -4,7 +4,6 @@ import { getOrCreateSessionId } from '@/lib/storage';
 import { logger } from '@/utils/logger';
 import type { ApiError, ApiResponse } from '@/types/api';
 
-
 function newRequestId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -13,6 +12,26 @@ function newRequestId(): string {
 let authToken: string | null = null;
 export function setAuthToken(token: string | null): void { authToken = token; }
 export function getAuthToken(): string | null { return authToken; }
+
+type RefreshHandler = () => Promise<string>;
+let refreshHandler: RefreshHandler | null = null;
+let refreshInFlight: Promise<string> | null = null;
+
+/** Registered once at app startup (see auth.ts) — avoids a circular import. */
+export function setRefreshHandler(handler: RefreshHandler | null): void {
+  refreshHandler = handler;
+}
+
+async function refreshOnce(): Promise<string> {
+  if (!refreshInFlight) {
+    if (!refreshHandler) throw new AuthError('No refresh handler registered', 'NO_REFRESH_HANDLER');
+    refreshInFlight = refreshHandler().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
 interface RequestConfig extends RequestInit { skipAuth?: boolean; }
 
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -46,17 +65,38 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export async function apiRequest<T>(endpoint: string, config: RequestConfig = {}): Promise<T> {
   const { skipAuth, ...fetchConfig } = config;
   const url = `${API_BASE_URL}${endpoint}`;
-  const headers = new Headers(fetchConfig.headers);
-  headers.set('Content-Type', 'application/json');
-  headers.set('Accept', 'application/json');
-  headers.set('X-Session-Id', getOrCreateSessionId());
-  headers.set('X-Request-ID', newRequestId());
-  if (!skipAuth && authToken) headers.set('Authorization', `Bearer ${authToken}`);
+  const doFetch = async (): Promise<Response> => {
+    const headers = new Headers(fetchConfig.headers);
+    headers.set('Content-Type', 'application/json');
+    headers.set('Accept', 'application/json');
+    headers.set('X-Session-Id', getOrCreateSessionId());
+    headers.set('X-Request-ID', newRequestId());
+    if (!skipAuth && authToken) headers.set('Authorization', `Bearer ${authToken}`);
+    return fetch(url, { ...fetchConfig, headers });
+  };
+
   const started = performance.now();
   try {
-    const response = await fetch(url, { ...fetchConfig, headers });
-    logger.debug( // correlation via X-Request-ID / X-Session-Id
-    'HTTP request completed', { endpoint, method: fetchConfig.method ?? 'GET', status: response.status, durationMs: performance.now() - started });
+    let response = await doFetch();
+
+    if (response.status === 401 && !skipAuth && refreshHandler) {
+      try {
+        await refreshOnce();
+        response = await doFetch();
+      } catch {
+        // Refresh failed — fall through to AuthError from handleResponse
+      }
+    }
+
+    logger.debug(
+      'HTTP request completed',
+      {
+        endpoint,
+        method: fetchConfig.method ?? 'GET',
+        status: response.status,
+        durationMs: performance.now() - started,
+      }
+    );
     return await handleResponse<T>(response);
   } catch (error) {
     if (error instanceof TypeError) throw new NetworkError();

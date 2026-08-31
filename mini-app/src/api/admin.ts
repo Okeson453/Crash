@@ -426,3 +426,20 @@ export async function getFeatureFlags(): Promise<FeatureFlag[]> {
 export async function setFeatureFlagEnabled(key: string, enabled: boolean): Promise<FeatureFlag> {
   return api.put<FeatureFlag>(`/api/v1/admin/feature-flags/${encodeURIComponent(key)}`, { enabled });
 }
+
+export interface SheathStatus {
+  level: number;
+  manualRecoveryRequired: boolean;
+  lastReason: string | null;
+  windowSize?: number;
+  predictedMean?: number;
+  realizedRate?: number;
+}
+
+export async function getSheathStatus(): Promise<SheathStatus> {
+  return api.get<SheathStatus>('/api/v1/admin/sheath/status');
+}
+
+export async function recoverSheath(): Promise<{ recovered: boolean }> {
+  return api.post<{ recovered: boolean }>('/api/v1/admin/sheath/recover', { confirm: true });
+}

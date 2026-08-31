@@ -25,11 +25,13 @@ import { AdminTransactionsScreen } from './admin/AdminTransactionsScreen';
 import { AdminLogsScreen } from './admin/AdminLogsScreen';
 import { AdminAlertsScreen } from './admin/AdminAlertsScreen';
 import { AdminFeatureFlagsScreen } from './admin/AdminFeatureFlagsScreen';
+import { AdminSheathScreen } from './admin/AdminSheathScreen';
 
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Users' },
   { id: 'engines', label: 'Engines' },
+  { id: 'sheath', label: 'Sheath' },
   { id: 'sessions', label: 'Sessions' },
   { id: 'bets', label: 'Active Bets' },
   { id: 'risk', label: 'Risk' },
@@ -67,6 +69,7 @@ export function AdminScreen() {
       {activeTab === 'overview' && <AdminOverviewScreen />}
       {activeTab === 'users' && <AdminUsersScreen />}
       {activeTab === 'engines' && <AdminEnginesScreen />}
+      {activeTab === 'sheath' && <AdminSheathScreen />}
       {activeTab === 'sessions' && <AdminSessionsScreen />}
       {activeTab === 'bets' && <AdminActiveBetsScreen />}
       {activeTab === 'risk' && <AdminRiskScreen />}

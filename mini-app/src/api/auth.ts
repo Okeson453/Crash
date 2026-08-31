@@ -1,4 +1,4 @@
-import { api, setAuthToken } from './client';
+import { api, setAuthToken, setRefreshHandler } from './client';
 import { getStorageItem, removeStorageItem, setStorageItem } from '@/lib/storage';
 import type { TelegramAuthResponse, RefreshTokenRequest, User, AuthTokens } from '@/types/api';
 const TOKEN_KEY = 'auth-tokens';
@@ -20,8 +20,20 @@ export async function authenticateWithTelegram(initData: string): Promise<Telegr
   const response = await api.post<TelegramAuthResponse>('/api/v1/auth/telegram', { initData }); storeTokens(response.tokens); return response;
 }
 export async function refreshAccessToken(): Promise<AuthTokens> {
-  const tokens = getStoredTokens(); if (!tokens) throw new Error('No refresh token available');
-  const response = await api.post<AuthTokens>('/api/v1/auth/refresh', { refreshToken: tokens.refreshToken } satisfies RefreshTokenRequest); storeTokens(response); return response;
+  const tokens = getStoredTokens();
+  if (!tokens) throw new Error('No refresh token available');
+  const response = await api.post<AuthTokens>(
+    '/api/v1/auth/refresh',
+    { refreshToken: tokens.refreshToken } satisfies RefreshTokenRequest,
+    { skipAuth: true }
+  );
+  storeTokens(response);
+  return response;
 }
 export async function logout(): Promise<void> { try { await api.post('/api/v1/auth/logout'); } finally { clearTokens(); } }
 export async function getCurrentUser(): Promise<User> { return api.get<User>('/api/v1/auth/me'); }
+
+setRefreshHandler(async () => {
+  const tokens = await refreshAccessToken();
+  return tokens.accessToken;
+});

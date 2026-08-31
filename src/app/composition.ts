@@ -61,7 +61,7 @@ import { SentimentWorker } from '../workers/sentiment/sentiment-worker';
 import { AnalyticsWorker } from '../workers/analytics/analytics-worker';
 import { RiskWorker } from '../workers/risk/risk-worker';
 import { FeatureStore } from '../prediction/feature-store';
-import { EnsembleOrchestrator } from '../prediction/ensemble';
+import { EnsembleOrchestrator } from '../prediction/ensemble/ensemble-orchestrator.js';
 import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
 import { SettlementReconciler } from '../background-workers/settlement-reconciler';

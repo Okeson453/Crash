@@ -98,7 +98,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     mode: process.env.SYSTEM_MODE || 'dry-run',
   };
 
-  function sessionPayload(extra: Record<string, unknown> = {}) {
+  async function sessionPayload(extra: Record<string, unknown> = {}) {
     const state = miniGameService.getState();
     const status =
       state.phase === 'running' || state.phase === 'countdown'
@@ -108,17 +108,47 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
           : state.phase === 'idle'
             ? 'idle'
             : state.phase;
+
+    let totals = { totalRounds: 0, totalBets: 0, totalPnl: 0 };
+    let healthChecks: Array<{ name: string; ok: boolean; detail?: string }> = [];
+    try {
+      const [roundsRow, betsRow] = await Promise.all([
+        getPool().query(
+          `SELECT COUNT(*)::int AS total_rounds FROM mini_app_rounds WHERE phase = 'crashed'`
+        ),
+        getPool().query(
+          `SELECT COUNT(*)::int AS total_bets, COALESCE(SUM(pnl), 0)::float AS total_pnl
+           FROM mini_app_bets
+           WHERE state IN ('cashed_out', 'lost')`
+        ),
+      ]);
+      totals = {
+        totalRounds: Number(roundsRow.rows[0]?.total_rounds ?? 0),
+        totalBets: Number(betsRow.rows[0]?.total_bets ?? 0),
+        totalPnl: Number(betsRow.rows[0]?.total_pnl ?? 0),
+      };
+      healthChecks = [
+        { name: 'database', ok: true },
+        { name: 'engine', ok: state.phase !== undefined },
+      ];
+    } catch (err) {
+      getLogger().warn(
+        { component: 'AdminAPI', error: err instanceof Error ? err.message : String(err) },
+        'sessionPayload: failed to load real totals, returning partial data'
+      );
+      healthChecks = [{ name: 'database', ok: false, detail: 'query failed' }];
+    }
+
     return {
       status,
       mode: process.env.SYSTEM_MODE || 'dry-run',
       phase: state.phase,
       roundId: state.roundId,
+      currentRoundId: state.roundId,
       uptimeSeconds: process.uptime(),
-      totalRounds: 0,
-      totalBets: 0,
-      totalPnl: 0,
+      ...totals,
       lastError: null,
-      healthChecks: [],
+      healthChecks,
       serverTime: state.serverTime,
       ...extra,
     };
@@ -126,28 +156,28 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/admin/session
   fastify.get('/session', async (_request, reply) => {
-    reply.send({ data: sessionPayload() });
+    reply.send({ data: await sessionPayload() });
   });
 
   fastify.post('/game/start', async (_request, reply) => {
     miniGameService.start();
-    reply.send({ data: sessionPayload({ status: 'running' }) });
+    reply.send({ data: await sessionPayload({ status: 'running' }) });
   });
   fastify.post('/game/pause', async (_request, reply) => {
     miniGameService.pause();
-    reply.send({ data: sessionPayload({ status: 'paused' }) });
+    reply.send({ data: await sessionPayload({ status: 'paused' }) });
   });
   fastify.post('/game/resume', async (_request, reply) => {
     miniGameService.resume();
-    reply.send({ data: sessionPayload({ status: 'running' }) });
+    reply.send({ data: await sessionPayload({ status: 'running' }) });
   });
   fastify.post('/game/stop', async (_request, reply) => {
     miniGameService.stop();
-    reply.send({ data: sessionPayload({ status: 'stopped' }) });
+    reply.send({ data: await sessionPayload({ status: 'stopped' }) });
   });
   fastify.post('/game/emergency-stop', async (_request, reply) => {
     miniGameService.emergencyStop();
-    reply.send({ data: sessionPayload({ status: 'stopped', mode: 'maintenance', lastError: 'Emergency stop triggered' }) });
+    reply.send({ data: await sessionPayload({ status: 'stopped', mode: 'maintenance', lastError: 'Emergency stop triggered' }) });
   });
 
   // GET /api/v1/admin/config — persisted
@@ -641,6 +671,23 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
     reply.send({ data });
+  });
+
+  /**
+   * GET /admin/sheath/status — read-only divergence / sheath state for operator UI
+   */
+  fastify.get('/sheath/status', async (_request, reply) => {
+    const snap = globalLiveDivergence.evaluate();
+    reply.send({
+      data: {
+        level: snap.level,
+        manualRecoveryRequired: snap.manualRecoveryRequired,
+        lastReason: snap.reason ?? null,
+        windowSize: snap.windowSize,
+        predictedMean: snap.predictedMean,
+        realizedRate: snap.realizedRate,
+      },
+    });
   });
 
   /**

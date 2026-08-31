@@ -227,6 +227,35 @@ export class BetRepository {
     }
   }
 
+  /**
+   * Stable-ordered pagination for balance reconciliation.
+   * ORDER BY created_at ASC, id ASC is required so OFFSET pages do not overlap or skip rows.
+   */
+  async findByStatePaged(
+    state: BetState,
+    limit: number = 1000,
+    offset: number = 0
+  ): Promise<BetRecord[]> {
+    const query = `
+      SELECT * FROM bets
+      WHERE state = $1
+      ORDER BY created_at ASC, id ASC
+      LIMIT $2
+      OFFSET $3
+    `;
+    try {
+      const result = await this.pool.query(query, [state, limit, offset]);
+      return result.rows.map((row) => this.mapRow(row));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        { component: 'BetRepository', error: message, state, offset },
+        'Failed to find bets by state (paged)'
+      );
+      throw new CriticalError(`Bet paged find by state failed: ${message}`, 'BET_FIND_STATE_PAGED_FAILED');
+    }
+  }
+
   async findActiveBets(): Promise<BetRecord[]> {
     const query = `
       SELECT * FROM bets
@@ -566,6 +595,22 @@ export class InMemoryBetRepository {
     return Array.from(this.bets.values())
       .filter((b) => b.state === state)
       .slice(0, limit);
+  }
+
+  async findByStatePaged(
+    state: BetState,
+    limit: number = 1000,
+    offset: number = 0
+  ): Promise<BetRecord[]> {
+    const all = Array.from(this.bets.values())
+      .filter((b) => b.state === state)
+      .sort((a, b) => {
+        const ta = Date.parse(a.createdAt) || 0;
+        const tb = Date.parse(b.createdAt) || 0;
+        if (ta !== tb) return ta - tb;
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+    return all.slice(offset, offset + limit);
   }
 
   async findActiveBets(): Promise<BetRecord[]> {
