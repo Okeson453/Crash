@@ -1,9 +1,13 @@
 # Railway / default builder — multi-stage production image with migrations
 # Playwright npm package and Docker browser runtime MUST stay in lockstep.
 FROM mcr.microsoft.com/playwright:v1.62.1-jammy AS base
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+# Pin Node 20 LTS to match package.json engines (>=20 <23).
+# Do not use setup_22.x — NodeSource's 22 channel can resolve to Node 24.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
- && npm install -g npm@11 \
+ && node -v | grep -E '^v20\.' \
+ && npm install -g npm@10 \
  && npm config set registry https://registry.npmjs.org/ \
  && rm -rf /var/lib/apt/lists/*
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
