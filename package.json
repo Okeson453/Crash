@@ -76,7 +76,8 @@
     "telegraf": "^4.16.3",
     "typescript": "^5.9.3",
     "ws": "^8.21.3",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "@fastify/helmet": "^13.1.1"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
@@ -97,9 +98,8 @@
     "tsx": "^4.17.0"
   },
   "optionalDependencies": {
-    "@fastify/helmet": "^11.1.1",
-    "@fastify/swagger": "^8.14.0",
-    "@fastify/swagger-ui": "^3.0.0",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^5.2.2",
     "@socket.io/redis-adapter": "^8.3.0"
   }
 }
