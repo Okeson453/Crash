@@ -1,6 +1,21 @@
 /**
  * Environment configuration
+ *
+ * Every Mini App public env var must be VITE_-prefixed (Vite only exposes those
+ * to the client bundle) and configured in Vercel project settings — never Railway.
  */
+
+const REQUIRED_PUBLIC_ENV_VARS = ['VITE_API_BASE_URL'] as const;
+
+if (import.meta.env.PROD) {
+  for (const key of REQUIRED_PUBLIC_ENV_VARS) {
+    if (!import.meta.env[key]) {
+      throw new Error(
+        `Missing required Mini App env var: ${key} — set it in Vercel project settings (not Railway)`
+      );
+    }
+  }
+}
 
 const getEnv = (key: string, defaultValue?: string): string => {
   const value = import.meta.env[key];

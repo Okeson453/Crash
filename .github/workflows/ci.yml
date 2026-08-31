@@ -57,6 +57,14 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: mini-app/package-lock.json
+
+      - name: Guard against secrets in Mini App public env
+        run: |
+          if grep -E '^VITE_.*(SECRET|PASSWORD|TOKEN|KEY|CREDENTIAL)' mini-app/.env.example mini-app/.env* 2>/dev/null; then
+            echo "::error::A secret-looking variable is VITE_-prefixed — it would ship to the browser bundle."
+            exit 1
+          fi
+          echo "No VITE_ secret-looking keys found."
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run typecheck

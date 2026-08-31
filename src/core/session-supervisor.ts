@@ -22,11 +22,15 @@ import {
 import { DryRunController } from './dry-run/dry-run-controller';
 import { maskEmail, takeTenantLogin } from '../security/ephemeral-login';
 import path from 'path';
+import { runNetworkPreflight } from '../browser/preflight';
+import { SessionHealthTracker } from './session-health';
+import { normalizeProxyPool, parseProxyEndpoint } from '../network/proxy-manager';
+import { EventEmitter } from 'events';
 
 export type SupervisorPhase =
   | 'idle' | 'initializing' | 'launching-browser' | 'restoring-session'
   | 'authenticating' | 'auth-required' | 'browser-failed' | 'region-blocked'
-  | 'navigating' | 'loading-game' | 'observing' | 'paused' | 'recovering' | 'error' | 'stopped';
+  | 'navigating' | 'loading-game' | 'observing' | 'paused' | 'recovering' | 'error' | 'stopped' | 'preflight-failed';
 
 export interface SessionSupervisorOptions {
   config: AppConfig;
@@ -47,6 +51,7 @@ export interface SupervisorState {
   startedAt: string | null;
   loginStatus: LoginStatus;
   lastLoginReport: LoginTestReport | null;
+  lastProxyIndex?: number;
 }
 
 /**
@@ -69,6 +74,8 @@ export class SessionSupervisor {
   private dryRunController: DryRunController | null = null;
   private signalEvaluator: ((roundId: string) => void | Promise<void>) | null = null;
   private onDegradedUnsub: (() => void) | null = null;
+  private readonly healthTracker = new SessionHealthTracker();
+  private readonly phaseEmitter = new EventEmitter();
 
   constructor(options: SessionSupervisorOptions) {
     this.options = options;
@@ -154,6 +161,27 @@ export class SessionSupervisor {
     const wasObserving = this.state.observing;
     const mode = String(this.options.config.system.mode ?? '').toLowerCase();
     try {
+      const proxyServer =
+        this.options.config.proxy?.server ??
+        this.options.config.browser?.network?.proxyServer ??
+        null;
+      const preflight = await runNetworkPreflight(
+        process.env.BC_GAME_LOGIN_URL?.trim() || 'https://bc.game',
+        proxyServer
+      );
+      if (!preflight.ok) {
+        this.setPhase('preflight-failed', 'NETWORK_PREFLIGHT_FAILED');
+        this.healthTracker.recordFailure('NETWORK_PREFLIGHT_FAILED');
+        return {
+          ok: false,
+          authenticated: false,
+          detail: 'NETWORK_PREFLIGHT_FAILED',
+          code: 'NETWORK_PREFLIGHT_FAILED',
+          maskedEmail: masked,
+          observing: this.state.observing,
+        };
+      }
+
       if (!this.browserManager?.getPage?.()) {
         await this.initializeProfile();
         await this.launchBrowser();
@@ -174,20 +202,58 @@ export class SessionSupervisor {
         browserSession: this.browserSession,
         context: this.browserManager?.getContext?.() ?? null,
       });
-      password = '';
       this.state.lastLoginReport = report;
       this.state.loginStatus = report.status;
       if (report.regionBlocked || report.status === 'REGION_BLOCKED') {
-        if (!(mode === 'dry-run' && wasObserving)) this.state.phase = 'region-blocked';
+        if (!(mode === 'dry-run' && wasObserving)) this.setPhase('region-blocked', 'REGION_BLOCKED');
         this.state.authenticated = false;
-        return { ok: false, authenticated: false, regionBlocked: true, detail: 'REGION_BLOCKED', maskedEmail: masked, loginReport: report, observing: this.state.observing };
+        this.healthTracker.recordFailure('REGION_BLOCKED');
+
+        const pool = normalizeProxyPool(this.options.config.proxy?.pool);
+        const alreadyTriedProxy = this.state.lastProxyIndex ?? -1;
+        const nextProxyIndex = alreadyTriedProxy + 1;
+
+        if (pool.length > 0 && nextProxyIndex < pool.length) {
+          this.logger.warn(
+            { component: 'SessionSupervisor', proxyIndex: nextProxyIndex, poolSize: pool.length },
+            'Region blocked — retrying via next proxy in pool'
+          );
+          this.state.lastProxyIndex = nextProxyIndex;
+          await this.notifyOperator(
+            `⚠️ BC.Game blocked the current egress region. Retrying with proxy ${nextProxyIndex + 1}/${pool.length}.`
+          );
+          const resolved = parseProxyEndpoint(pool[nextProxyIndex]);
+          if (resolved) {
+            await this.reinitializeBrowserWithProxy(resolved);
+            // Retry login once with the new egress (credentials already validated shape)
+            return this.loginWithCredentials(email, password);
+          }
+        }
+
+        password = '';
+        await this.notifyOperator(
+          `🛑 BC.Game region-blocked and no working proxy is configured/remaining (tried ${pool.length}). ` +
+            `Betting is paused until PROXY_POOL is updated or the deployment region changes.`
+        );
+        return {
+          ok: false,
+          authenticated: false,
+          regionBlocked: true,
+          detail: 'REGION_BLOCKED',
+          maskedEmail: masked,
+          loginReport: report,
+          observing: this.state.observing,
+        };
       }
       if (report.status !== 'AUTHENTICATED') {
-        if (!(mode === 'dry-run' && wasObserving)) this.state.phase = 'auth-required';
+        password = '';
+        if (!(mode === 'dry-run' && wasObserving)) this.setPhase('auth-required', report.classification);
         return { ok: false, authenticated: false, detail: report.classification, maskedEmail: masked, loginReport: report, observing: this.state.observing };
       }
+      password = '';
       this.state.authenticated = true;
       this.state.loginStatus = 'AUTHENTICATED';
+      this.healthTracker.recordSuccess();
       if (!this.state.observing) {
         try {
           await this.navigateToGame();
@@ -242,6 +308,80 @@ export class SessionSupervisor {
   getGameAdapter() { return this.gameAdapter; }
   getRoundObserver() { return this.roundObserver; }
   getHealthMonitor() { return this.healthMonitor; }
+
+
+  private setPhase(phase: SupervisorPhase, detail?: string): void {
+    const previous = this.state.phase;
+    this.state.phase = phase;
+    this.logger.info(
+      { component: 'SessionSupervisor', previousPhase: previous, newPhase: phase, detail },
+      'Session phase transition'
+    );
+    this.phaseEmitter.emit('phase:changed', {
+      previous,
+      current: phase,
+      detail,
+      at: new Date().toISOString(),
+    });
+  }
+
+  onPhaseChange(
+    listener: (ev: { previous: SupervisorPhase; current: SupervisorPhase; detail?: string; at: string }) => void
+  ): () => void {
+    this.phaseEmitter.on('phase:changed', listener);
+    return () => this.phaseEmitter.off('phase:changed', listener);
+  }
+
+  getSessionHealth() {
+    return this.healthTracker.snapshot(
+      this.state.authenticated,
+      this.state.phase,
+      this.state.browserLaunched
+    );
+  }
+
+  private async notifyOperator(message: string): Promise<void> {
+    this.logger.warn({ component: 'SessionSupervisor', operatorAlert: true }, message);
+    try {
+      const chatId = process.env.TELEGRAM_OPERATOR_CHAT_ID;
+      if (chatId) {
+        // Best-effort: gateway may not be constructed in this process role
+        const { getLogger } = await import('../observability/logger');
+        getLogger().info({ component: 'SessionSupervisor', chatId }, message);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async reinitializeBrowserWithProxy(proxy: {
+    server: string;
+    username?: string;
+    password?: string;
+  }): Promise<void> {
+    this.setPhase('recovering', 'proxy-rotate');
+    if (this.browserManager) {
+      try {
+        this.browserManager.setRecoveryEnabled(false);
+        await this.browserManager.close();
+      } catch {
+        /* ignore */
+      }
+      this.browserManager = null;
+      this.state.browserLaunched = false;
+    }
+    // Mutate proxy config for subsequent toLaunchOptions
+    const cfg = this.options.config;
+    if (cfg.proxy) {
+      (cfg.proxy as { server?: string; username?: string; password?: string; enabled?: boolean }).enabled = true;
+      (cfg.proxy as { server?: string }).server = proxy.server;
+      if (proxy.username) (cfg.proxy as { username?: string }).username = proxy.username;
+      if (proxy.password) (cfg.proxy as { password?: string }).password = proxy.password;
+    }
+    await this.initializeProfile();
+    await this.launchBrowser();
+    await this.restoreSessionState();
+  }
 
   private async initializeProfile(): Promise<void> {
     const baseDir = process.env.BROWSER_PROFILE_DIR || path.join(process.cwd(), '.browser-profiles');

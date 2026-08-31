@@ -673,6 +673,34 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     reply.send({ data });
   });
 
+
+  /**
+   * GET /admin/session/health — richer session snapshot when supervisor is in-process
+   */
+  fastify.get('/session/health', async (_request, reply) => {
+    try {
+      const { getSessionSupervisor } = await import('@/app/composition');
+      const supervisor = getSessionSupervisor();
+      if (supervisor && typeof (supervisor as { getSessionHealth?: () => unknown }).getSessionHealth === 'function') {
+        reply.send({ data: (supervisor as { getSessionHealth: () => unknown }).getSessionHealth() });
+        return;
+      }
+      if (supervisor?.getState) {
+        const s = supervisor.getState();
+        reply.send({ data: { phase: s.phase, note: 'health tracker not available' } });
+        return;
+      }
+      reply.send({ data: { available: false, note: 'session supervisor not in this process role' } });
+    } catch (err) {
+      reply.send({
+        data: {
+          available: false,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  });
+
   /**
    * GET /admin/sheath/status — read-only divergence / sheath state for operator UI
    */

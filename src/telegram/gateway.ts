@@ -8,6 +8,7 @@
 
 import { Telegraf } from 'telegraf';
 import { getLogger } from '../observability/logger';
+import { getRedisClient } from '../persistence/redis-client';
 import { TelegramBotConfig, OperatorContext, BotHealthStatus } from './types';
 import { createAuthMiddleware } from './auth';
 import { createRouter, CommandRouter, RouterDependencies } from './router';
@@ -23,6 +24,9 @@ export interface TelegramGatewayOptions {
 }
 
 export class TelegramGateway {
+  private pollingLockRenewal: NodeJS.Timeout | null = null;
+  private pollingLockKey = 'telegram:polling-lock';
+  private holdsPollingLock = false;
   private bot: Telegraf<OperatorContext> | null = null;
   private readonly config: TelegramBotConfig;
   private readonly tenantResolver?: TenantResolver;
@@ -165,9 +169,7 @@ export class TelegramGateway {
           'Bot started in webhook mode'
         );
       } else {
-        await this.bot.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => undefined);
-        await this.bot.launch();
-        logger.info({ component: 'TelegramGateway', mode: 'polling' }, 'Bot started in polling mode');
+        await this.launchPolling();
       }
 
       this.isRunning = true;
@@ -193,8 +195,89 @@ export class TelegramGateway {
     }
   }
 
+
+  private async acquirePollingLock(lockKey: string, ttlMs: number): Promise<boolean> {
+    try {
+      const redis = getRedisClient();
+      const token = `${process.pid}:${Date.now()}`;
+      const result = await redis.set(lockKey, token, 'PX', ttlMs, 'NX');
+      this.holdsPollingLock = result === 'OK';
+      return this.holdsPollingLock;
+    } catch (err) {
+      logger.warn(
+        { component: 'TelegramGateway', error: err instanceof Error ? err.message : String(err) },
+        'Polling lock unavailable — proceeding without distributed lock (single-instance only)'
+      );
+      this.holdsPollingLock = true;
+      return true;
+    }
+  }
+
+  private async renewPollingLock(lockKey: string, ttlMs: number): Promise<void> {
+    if (!this.holdsPollingLock) return;
+    try {
+      const redis = getRedisClient();
+      await redis.pexpire(lockKey, ttlMs);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async releasePollingLock(lockKey: string): Promise<void> {
+    if (this.pollingLockRenewal) {
+      clearInterval(this.pollingLockRenewal);
+      this.pollingLockRenewal = null;
+    }
+    if (!this.holdsPollingLock) return;
+    try {
+      await getRedisClient().del(lockKey);
+    } catch {
+      /* ignore */
+    }
+    this.holdsPollingLock = false;
+  }
+
+  private async launchPolling(): Promise<void> {
+    const lockKey = this.pollingLockKey;
+    const lockTtlMs = 30_000;
+    const gotLock = await this.acquirePollingLock(lockKey, lockTtlMs);
+    if (!gotLock) {
+      logger.warn(
+        { component: 'TelegramGateway' },
+        'Another instance already holds the Telegram polling lock — skipping launch here'
+      );
+      return;
+    }
+    this.pollingLockRenewal = setInterval(() => {
+      void this.renewPollingLock(lockKey, lockTtlMs);
+    }, lockTtlMs / 2);
+
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.bot!.telegram.deleteWebhook({ drop_pending_updates: false }).catch(() => undefined);
+        await this.bot!.launch();
+        logger.info(
+          { component: 'TelegramGateway', mode: 'polling', attempt },
+          'Bot started in polling mode'
+        );
+        return;
+      } catch (err) {
+        const is409 = err instanceof Error && /409/.test(err.message);
+        if (!is409 || attempt === maxAttempts) throw err;
+        const backoffMs = Math.min(2000 * 2 ** (attempt - 1), 30_000);
+        logger.warn(
+          { component: 'TelegramGateway', attempt, backoffMs },
+          '409 conflict on getUpdates — likely a stale poller from a previous deploy, retrying'
+        );
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+  }
+
   async stop(): Promise<void> {
     if (!this.isRunning || !this.bot) {
+      await this.releasePollingLock(this.pollingLockKey);
       return;
     }
 
@@ -208,6 +291,7 @@ export class TelegramGateway {
       this.bot.stop();
       this.isRunning = false;
       this.health.connected = false;
+      await this.releasePollingLock(this.pollingLockKey);
 
       logger.info(
         {

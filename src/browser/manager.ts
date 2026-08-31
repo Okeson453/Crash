@@ -24,6 +24,10 @@ export class BrowserManager {
   private readonly options: BrowserLaunchOptions;
   private fingerprint: FingerprintProfile | null = null;
   private lifecycleListeners: Array<(event: { phase: BrowserLifecyclePhase; detail?: string; error?: string }) => void> = [];
+  private recoveryAttempts = 0;
+  private readonly maxRecoveryAttempts = 5;
+  private recoveryTimer: NodeJS.Timeout | null = null;
+  private recoveryEnabled = true;
 
   constructor(options: BrowserLaunchOptions) {
     this.options = options;
@@ -160,12 +164,14 @@ export class BrowserManager {
         this.logger.error({ component: 'BrowserManager' }, 'Page crashed');
         this.state.launched = false;
         this.emitLifecycle('error', undefined, 'Page crashed');
+        void this.scheduleRecovery();
       });
 
       this.page!.on('close', () => {
         this.logger.warn({ component: 'BrowserManager' }, 'Page closed unexpectedly');
         this.state.launched = false;
         this.page = null;
+        void this.scheduleRecovery();
       });
 
       this.state.launched = true;
@@ -337,6 +343,11 @@ export class BrowserManager {
   }
 
   async close(): Promise<void> {
+    this.setRecoveryEnabled(false);
+    if (this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
     this.emitLifecycle('closing');
     this.logger.info({ component: 'BrowserManager' }, 'Closing browser');
 
@@ -367,11 +378,70 @@ export class BrowserManager {
 
       this.emitLifecycle('closed');
       this.logger.info({ component: 'BrowserManager' }, 'Browser closed');
+      this.setRecoveryEnabled(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error({ component: 'BrowserManager', error: message }, 'Error during browser close');
       this.emitLifecycle('error', undefined, message);
     }
+  }
+
+
+  /** Disable auto-recovery (e.g. during intentional shutdown). */
+  setRecoveryEnabled(enabled: boolean): void {
+    this.recoveryEnabled = enabled;
+    if (!enabled && this.recoveryTimer) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
+  private async scheduleRecovery(): Promise<void> {
+    if (!this.recoveryEnabled) return;
+    if (this.recoveryTimer) return; // already scheduled
+    if (this.recoveryAttempts >= this.maxRecoveryAttempts) {
+      this.logger.error(
+        { component: 'BrowserManager', attempts: this.recoveryAttempts },
+        'Max browser recovery attempts exceeded — giving up, manual intervention required'
+      );
+      this.emitLifecycle('error', undefined, 'Recovery exhausted — manual restart required');
+      return;
+    }
+    const backoffMs = Math.min(5_000 * 2 ** this.recoveryAttempts, 120_000);
+    this.recoveryAttempts += 1;
+    this.logger.warn(
+      { component: 'BrowserManager', attempt: this.recoveryAttempts, backoffMs },
+      'Scheduling browser recovery'
+    );
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      void this.relaunch().then(
+        () => {
+          this.recoveryAttempts = 0;
+          this.logger.info({ component: 'BrowserManager' }, 'Browser recovered successfully');
+        },
+        (err) => {
+          this.logger.error(
+            { component: 'BrowserManager', error: String(err) },
+            'Recovery attempt failed'
+          );
+          void this.scheduleRecovery();
+        }
+      );
+    }, backoffMs);
+  }
+
+  /** Close any half-open browser and relaunch using the same options. */
+  async relaunch(): Promise<Page> {
+    this.setRecoveryEnabled(false);
+    try {
+      await this.close();
+    } catch {
+      /* ignore */
+    } finally {
+      this.setRecoveryEnabled(true);
+    }
+    return this.launch();
   }
 
   async forceKill(): Promise<void> {

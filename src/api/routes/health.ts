@@ -5,23 +5,17 @@ import { getReadiness, isReadyForLive } from '@/observability/readiness';
 import { resolveProcessRole } from '@/config/loader';
 
 export async function healthRoutes(fastify: FastifyInstance): Promise<void> {
+  /**
+   * Liveness probe for Railway/K8s — always 200 once the HTTP server is up.
+   * Do not gate on DB/Redis/browser so cold-start Chromium never causes a kill loop.
+   * Use /ready for readiness of dependencies and prediction stack.
+   */
   fastify.get('/health', async (_request, reply) => {
-    let database: 'ok' | 'error' = 'ok';
-    let redis: 'ok' | 'error' = 'ok';
-    try { await getPool().query('SELECT 1'); } catch { database = 'error'; }
-    try {
-      const r = getRedisClient();
-      if (typeof (r as { ping?: () => Promise<unknown> }).ping === 'function') {
-        await (r as { ping: () => Promise<unknown> }).ping();
-      }
-    } catch { redis = 'error'; }
-    const prod = process.env.NODE_ENV === 'production';
-    const status = database === 'ok' && (!prod || redis === 'ok') ? 'ok' : 'degraded';
-    reply.status(status === 'ok' ? 200 : 503).send({
-      status,
+    reply.status(200).send({
+      status: 'ok',
       version: process.env.APP_VERSION ?? 'dev',
       role: process.env.PROCESS_ROLE ?? 'all',
-      dependencies: { database, redis },
+      ts: new Date().toISOString(),
     });
   });
 
