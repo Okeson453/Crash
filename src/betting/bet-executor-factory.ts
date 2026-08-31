@@ -6,7 +6,6 @@
  */
 
 import { getLogger } from '../observability/logger.js';
-import { assertNoMockAdapterInProduction } from './adapters/browser.js';
 
 export type ExecutionMode = 'live' | 'dry-run' | 'observe-only' | 'maintenance';
 

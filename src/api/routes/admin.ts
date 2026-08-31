@@ -22,7 +22,6 @@ import { requireRole } from '@/api/middleware/role-guard';
 import { getTenantManager } from '@/app/composition';
 import { getPool } from '@/persistence/client';
 import { paginationSchema } from '@/api/validators/common';
-import type { Tenant } from '@/platform/types';
 import { miniGameService } from '@/mini-app/game-service';
 import { getAdminReferralOverview } from '@/platform/referrals/referral-service';
 import {
@@ -56,7 +55,38 @@ const configSchema = z.object({
   mode: z.enum(['observe-only', 'dry-run', 'live', 'maintenance']).optional(),
 });
 
-function publicUser(user: Tenant) { return { id: user.id, telegramId: user.telegramId.toString(), telegramUsername: user.telegramUsername, firstName: user.firstName, lastName: user.lastName, photoUrl: user.photoUrl, email: user.email, status: user.status, role: user.role, planId: user.planId, planName: null, timezone: user.timezone, createdAt: user.createdAt.toISOString(), updatedAt: user.updatedAt.toISOString() }; }
+function publicUser(user: {
+  id: string;
+  telegramId: bigint | string | number;
+  telegramUsername?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  photoUrl?: string | null;
+  email?: string | null;
+  status: string;
+  role?: string | null;
+  planId?: string | null;
+  timezone?: string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}) {
+  return {
+    id: user.id,
+    telegramId: typeof user.telegramId === 'bigint' ? user.telegramId.toString() : String(user.telegramId),
+    telegramUsername: user.telegramUsername ?? null,
+    firstName: user.firstName ?? '',
+    lastName: user.lastName ?? null,
+    photoUrl: user.photoUrl ?? null,
+    email: user.email ?? null,
+    status: user.status,
+    role: user.role ?? 'player',
+    planId: user.planId ?? null,
+    planName: null,
+    timezone: user.timezone ?? 'UTC',
+    createdAt: user.createdAt instanceof Date ? user.createdAt.toISOString() : String(user.createdAt),
+    updatedAt: user.updatedAt instanceof Date ? user.updatedAt.toISOString() : String(user.updatedAt),
+  };
+}
 
 export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.addHook('preHandler', authenticateRequest);
@@ -679,7 +709,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get('/session/health', async (_request, reply) => {
     try {
-      const { getSessionSupervisor } = await import('@/app/composition');
+      const { getSessionSupervisor } = await import('../../app/composition.js');
       const supervisor = getSessionSupervisor();
       if (supervisor && typeof (supervisor as { getSessionHealth?: () => unknown }).getSessionHealth === 'function') {
         reply.send({ data: (supervisor as { getSessionHealth: () => unknown }).getSessionHealth() });

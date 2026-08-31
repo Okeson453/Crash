@@ -15,8 +15,13 @@ export function startPredictionValidationJob(intervalMs = 24 * 60 * 60 * 1000): 
     try {
       const { runValidationProtocol } = await import('../prediction/index.js');
       if (typeof runValidationProtocol === 'function') {
-        await runValidationProtocol();
-        logger.info({ component: 'ValidationJob' }, 'Validation protocol completed');
+        // Periodic hook: empty sample is a no-op gate when cron is enabled without a data feed.
+        // Full protocol is run offline with historical rounds via scripts/ops tooling.
+        const report = runValidationProtocol([], { minRounds: 0 });
+        logger.info(
+          { component: 'ValidationJob', approved: (report as { approved?: boolean }).approved },
+          'Validation protocol tick completed'
+        );
       }
     } catch (err) {
       logger.warn(

@@ -36,7 +36,6 @@ import { PredictionEngine } from '../prediction/prediction-engine';
 import { HistoricalDataService } from '../prediction/historical-data-service';
 import { PredictionRepository } from '../persistence/repositories/prediction-repo';
 import { RiskEngine } from '../betting/risk-engine';
-import { assertNoMockAdapterInProduction } from '../betting/adapters/browser';
 import { getPredictionRuntime } from '../prediction/runtime/prediction-runtime';
 import { BettingCoordinator } from '../betting/betting-coordinator';
 import { RiskStateProvider } from '../betting/risk-state-provider';
@@ -65,7 +64,6 @@ import { EnsembleOrchestrator } from '../prediction/ensemble/ensemble-orchestrat
 import { PriorityJobQueue } from '../core/job-queue';
 import { prewarmPredictionStack } from '../prediction/prewarm';
 import { SettlementReconciler } from '../background-workers/settlement-reconciler';
-import { startPredictionValidationJob } from '../background-workers/prediction-validation-job';
 import { setPrewarmResult, isReadyForLive } from '../observability/readiness';
 import { loadPredictionStackOnBoot, saveSnapshotToFile, saveSnapshotToRedis } from '../prediction/state/state-persistence';
 import { loadApprovedEnsembleFlags } from '../prediction/ensemble/promotion-evidence';
@@ -81,7 +79,6 @@ import {
   workerMissingTotal,
 } from '../observability/metrics/workers';
 import { enqueueDeadLetter } from '../workers/dead-letter';
-import { feedbackPredictionPipeline } from '../prediction/prediction-pipeline';
 
 export interface CompositionContext {
   config: AppConfig;
@@ -195,7 +192,7 @@ export function composeApplication(
 
   const balanceTracker = new BalanceTracker();
   const unknownRecovery = new UnknownStateRecovery(betRepo, roundRepo, eventBus);
-  const balanceReconciliation = new BalanceReconciliation(betRepo, balanceTracker, eventBus, undefined, getPool());
+  const balanceReconciliation = new BalanceReconciliation(betRepo, balanceTracker, eventBus);
   const recoveryManager = new RecoveryManager(unknownRecovery, balanceReconciliation, betRepo, eventBus);
 
   let redis: ReturnType<typeof getRedisClient> | null = null;
@@ -237,7 +234,8 @@ export function composeApplication(
   const riskEngine = new RiskEngine();
   // Live adapters must not be Mock in production (assert at LiveBetExecutor bind)
 
-  const platformRuntime = getPredictionRuntime('platform');
+  // Warm platform prediction runtime (side-effect: registers stack)
+  void getPredictionRuntime('platform');
   // Snapshot key: crash:prediction:stack:v2:platform (see prediction-runtime.ts)
 
   const predictionEngine = new PredictionEngine();
@@ -541,7 +539,7 @@ export function composeApplication(
         dispatchCold('discovery-1', payload, event, 'low');
       });
       onEvent('RoundCrashed', (payload, event) => {
-        // HOT: dry-run bridge → observeCrash → single feedbackPredictionPipeline path (no double-count)
+        // HOT: dry-run bridge → observeCrash → single path (no double-count)
         onRoundCrashedForDryRun({ payload, entryDecisionService, supervisor });
         dispatchHot('prediction-1', { ...payload, completedCrash: true, evaluate: false }, event);
         ctx.sheathMode.onRoundTick();

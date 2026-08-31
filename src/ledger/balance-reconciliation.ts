@@ -58,7 +58,7 @@ const DEFAULT_CONFIG: BalanceReconciliationConfig = {
 export class BalanceReconciliation {
   private readonly logger = getLogger();
   private readonly config: BalanceReconciliationConfig;
-  private readonly injectedPool: { query: (q: string, a?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null;
+  private readonly injectedPool: { query: (q: string, a?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> } | null = null;
   private lastResult: ReconciliationResult | null = null;
   private consecutiveMismatches = 0;
   private maxConsecutiveMismatches = 3;

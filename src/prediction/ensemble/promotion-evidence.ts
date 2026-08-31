@@ -9,6 +9,7 @@ import type { EnsembleFlags } from './ensemble-orchestrator.js';
 const logger = getLogger();
 
 const DEFAULT_OFF: EnsembleFlags = {
+  enableAutocorrelation: false,
   enableMarkov: false,
   enableSpectral: false,
   enableEntropy: false,

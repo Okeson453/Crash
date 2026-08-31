@@ -346,7 +346,7 @@ export class SessionSupervisor {
       const chatId = process.env.TELEGRAM_OPERATOR_CHAT_ID;
       if (chatId) {
         // Best-effort: gateway may not be constructed in this process role
-        const { getLogger } = await import('../observability/logger');
+        const { getLogger } = await import('../observability/logger.js');
         getLogger().info({ component: 'SessionSupervisor', chatId }, message);
       }
     } catch {

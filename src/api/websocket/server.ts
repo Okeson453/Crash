@@ -148,7 +148,7 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
 
   io.on('connection', (socket: AuthenticatedSocket) => {
     getLogger().info({ component: 'MiniAppWebSocket', userId: socket.userId }, 'WS client connected');
-    socket.use((packet, next) => {
+    socket.use((_packet, next) => {
       const now = Date.now();
       const sid = socket.id;
       let w = msgWindow.get(sid);

@@ -31,6 +31,7 @@ export interface EnsembleFlags {
   enableMarkov: boolean;
   enableSpectral: boolean;
   enableEntropy: boolean;
+  enableStreak: boolean;
 }
 
 export const DEFAULT_ENSEMBLE_FLAGS: EnsembleFlags = {
@@ -38,6 +39,7 @@ export const DEFAULT_ENSEMBLE_FLAGS: EnsembleFlags = {
   enableMarkov: false,
   enableSpectral: false,
   enableEntropy: false,
+  enableStreak: false,
 };
 
 const BASE_WEIGHTS: Record<string, number> = {
@@ -87,6 +89,7 @@ export class EnsembleOrchestrator {
     const filtered = scores.map((s) => {
       if (
         (s.modelName === 'AutocorrelationModel' && !this.flags.enableAutocorrelation) ||
+        (s.modelName === 'StreakAwareModel' && !this.flags.enableStreak) ||
         (s.modelName === 'MarkovChainModel' && !this.flags.enableMarkov) ||
         (s.modelName === 'SpectralModel' && !this.flags.enableSpectral) ||
         (s.modelName === 'EntropyModel' && !this.flags.enableEntropy)

@@ -117,7 +117,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         const tid = await tenantManager.ensureOrgTenant(user.id);
         user = { ...user, tenantId: tid };
       } catch (err) {
-        const { getLogger } = await import('@/observability/logger');
+        const { getLogger } = await import('../../observability/logger.js');
         getLogger().warn(
           { component: 'Auth', userId: user.id, error: String(err) },
           'ensureOrgTenant failed'

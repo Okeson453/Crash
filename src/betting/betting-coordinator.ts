@@ -79,6 +79,7 @@ export class BettingCoordinator {
   private evaluating = false;
   private evaluatingChain: Promise<void> = Promise.resolve();
   private lastCashOutTargetByRound = new Map<string, number>();
+  private lastSignalExpiresAt: number | null = null;
   private readonly onEntryConfirmed?: () => void;
   private readonly dailyLedger: DailyEntryLedger | null;
   private readonly sheathMode: SheathMode | null;
