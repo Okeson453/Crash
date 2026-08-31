@@ -43,22 +43,46 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
     pingInterval: 30000,
   });
 
-  // Phase 3.2 — Redis adapter for multi-instance (separate pub/sub clients)
+  // Phase 3.2 — Redis adapter for multi-instance (separate pub/sub clients).
+  // Must wait until clients are ready; enableOfflineQueue:false causes
+  // "Stream isn't writeable" if psubscribe runs before the TLS socket is up.
   void (async () => {
     try {
       const redisUrl = process.env.REDIS_URL || process.env.SOCKET_REDIS_URL;
       if (!redisUrl || !io) return;
-      // Dynamic import so package remains optional at build time
-      // optional dependency may be present
+
       const adapterMod = await import('@socket.io/redis-adapter');
       const ioredis = await import('ioredis');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const RedisAny: any = (ioredis as any).Redis || (ioredis as any).default || ioredis;
-      const { redisOptionsFromUrl, attachRedisErrorHandler } = await import('../../persistence/redis-options.js');
-      const pubClient = new RedisAny(redisOptionsFromUrl(redisUrl, { maxRetriesPerRequest: null }));
+      const { redisOptionsFromUrl, attachRedisErrorHandler } = await import(
+        '../../persistence/redis-options.js'
+      );
+
+      // Socket.IO docs: maxRetriesPerRequest null; queue until connected before adapter.
+      const socketRedisOpts = redisOptionsFromUrl(redisUrl, {
+        maxRetriesPerRequest: null,
+        enableOfflineQueue: true,
+        lazyConnect: true,
+      });
+
+      const pubClient = new RedisAny(socketRedisOpts);
+      const subClient = new RedisAny(socketRedisOpts);
       attachRedisErrorHandler(pubClient, 'SocketIORedisPub');
-      const subClient = pubClient.duplicate();
       attachRedisErrorHandler(subClient, 'SocketIORedisSub');
+
+      const waitReady = (client: { connect: () => Promise<unknown>; status: string }) => {
+        if (client.status === 'ready') return Promise.resolve();
+        return client.connect();
+      };
+
+      await Promise.race([
+        Promise.all([waitReady(pubClient), waitReady(subClient)]),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Redis connect timeout (8s)')), 8000)
+        ),
+      ]);
+
       const createAdapter = adapterMod.createAdapter || adapterMod.default?.createAdapter;
       if (typeof createAdapter === 'function') {
         io.adapter(createAdapter(pubClient, subClient));
