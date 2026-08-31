@@ -24,8 +24,8 @@ export function createRedisClient(config: RedisConfig): Redis {
 
   redisClient = new Redis(
     redisOptionsFromUrl(config.url, {
-      password: config.password,
-      keyPrefix: keyPrefix || undefined,
+      ...(config.password ? { password: config.password } : {}),
+      ...(keyPrefix ? { keyPrefix } : {}),
       commandTimeout: config.commandTimeoutMs ?? 5000,
       reconnectOnError: (err) => {
         const msg = err.message.toLowerCase();

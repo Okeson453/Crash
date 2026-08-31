@@ -5,19 +5,28 @@
  */
 import type { RedisOptions } from 'ioredis';
 
+function definedOnly<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as Partial<T>;
+}
+
 export function redisOptionsFromUrl(
   redisUrl: string,
   overrides: RedisOptions = {}
 ): RedisOptions {
   const url = new URL(redisUrl);
   const isTls = url.protocol === 'rediss:' || url.protocol === 'https:';
-  const password =
-    decodeURIComponent(url.password || '') ||
-    undefined;
-  const username =
-    url.username && url.username !== 'default'
-      ? decodeURIComponent(url.username)
-      : undefined;
+
+  // Keep username even when it is "default" — ACL AUTH requires it on many hosts.
+  const username = url.username
+    ? decodeURIComponent(url.username)
+    : undefined;
+  const password = url.password
+    ? decodeURIComponent(url.password)
+    : undefined;
 
   const base: RedisOptions = {
     host: url.hostname,
@@ -35,11 +44,10 @@ export function redisOptionsFromUrl(
           },
         }
       : {}),
-    ...overrides,
   };
 
-  // Prefer structured options over a raw URL so SNI is always set for rediss://
-  return base;
+  // Do not let explicit `undefined` overrides wipe URL-derived auth.
+  return { ...base, ...definedOnly(overrides as Record<string, unknown>) } as RedisOptions;
 }
 
 export function attachRedisErrorHandler(
@@ -47,9 +55,7 @@ export function attachRedisErrorHandler(
   label: string
 ): void {
   client.on('error', (err) => {
-    // Avoid process crash from unhandled 'error' events
     try {
-      // lazy import to avoid circular deps at module load
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { getLogger } = require('../observability/logger') as {
         getLogger: () => { error: (o: object, m: string) => void };

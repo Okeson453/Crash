@@ -31,6 +31,9 @@ export async function startMiniGameEventRelay(
   try {
     const redis = getRedisClient();
     const sub = redis.duplicate();
+    sub.on('error', (err) => {
+      logger.warn({ component: 'GameEventRelay', error: err.message }, 'Redis sub client error');
+    });
     await sub.subscribe(CHANNEL);
     sub.on('message', (channel, message) => {
       if (channel !== CHANNEL) return;
