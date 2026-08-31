@@ -60,12 +60,12 @@ export async function saveConfigVersion(
   const pool = getPool();
   try {
     const ver = await pool.query(
-      `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM config_versions WHERE key = $1`,
+      `SELECT COALESCE(MAX(version), 0) + 1 AS next FROM admin_config_versions WHERE key = $1`,
       [key]
     );
     const version = Number(ver.rows[0]?.next ?? 1);
     await pool.query(
-      `INSERT INTO config_versions (key, payload, version, actor_id)
+      `INSERT INTO admin_config_versions (key, payload, version, actor_id)
        VALUES ($1, $2::jsonb, $3, $4)`,
       [key, JSON.stringify(value), version, actorId ?? null]
     );
@@ -82,7 +82,7 @@ export async function listConfigVersions(
   const pool = getPool();
   try {
     const r = await pool.query(
-      `SELECT version, payload, created_at, actor_id FROM config_versions
+      `SELECT version, payload, created_at, actor_id FROM admin_config_versions
        WHERE key = $1 ORDER BY version DESC LIMIT $2`,
       [key, limit]
     );

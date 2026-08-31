@@ -1,8 +1,5 @@
--- Admin settings version history (key/payload).
--- NOTE: Do NOT reuse table name "config_versions" — migration 001 already defines
--- that table for stake/cash-out automation config (different columns). Creating an
--- index on (key, version) against the 001 schema fails in ComputeIndexAttrs /
--- "column does not exist".
+-- Repair: if a previous 029 attempt left no admin_config_versions table, create it.
+-- Safe to re-run (IF NOT EXISTS).
 CREATE TABLE IF NOT EXISTS admin_config_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   key TEXT NOT NULL,
