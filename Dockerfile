@@ -2,11 +2,16 @@
 # Playwright npm package and Docker browser runtime MUST stay in lockstep.
 FROM mcr.microsoft.com/playwright:v1.62.1-jammy AS base
 # Pin Node 20 LTS to match package.json engines (>=20 <23).
-# Do not use setup_22.x — NodeSource's 22 channel can resolve to Node 24.
+# Playwright image may already ship Node 24 via NodeSource — purge it first,
+# otherwise apt keeps 24 as "newest" and setup_20.x never takes effect.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && (apt-get remove -y nodejs npm libnode* || true) \
+ && rm -f /etc/apt/sources.list.d/nodesource*.list \
+ && rm -f /etc/apt/keyrings/nodesource*.gpg \
  && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && node -v | grep -E '^v20\.' \
+ && npm -v \
  && npm install -g npm@10 \
  && npm config set registry https://registry.npmjs.org/ \
  && rm -rf /var/lib/apt/lists/*
