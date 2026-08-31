@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; img-src 'self' data: https: blob:; connect-src 'self' https://api.crashwave.example.com wss://api.crashwave.example.com; frame-ancestors 'none'; form-action 'self'; base-uri 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https: wss: http://localhost:* ws://localhost:*; frame-ancestors https://web.telegram.org https://telegram.org; form-action 'self'; base-uri 'self'" />
     <meta name="theme-color" content="var(--tg-theme-bg-color, #ffffff)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
