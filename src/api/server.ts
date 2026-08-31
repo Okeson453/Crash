@@ -115,8 +115,12 @@ export async function createApiServer(): Promise<FastifyInstance> {
         const ioredis = await import('ioredis');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const RedisAny = (ioredis as any).default || ioredis;
+        const { redisOptionsFromUrl, attachRedisErrorHandler } = await import('../persistence/redis-options.js');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const redis: any = new RedisAny(redisUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
+        const redis: any = new RedisAny(
+          redisOptionsFromUrl(redisUrl, { maxRetriesPerRequest: 1, enableOfflineQueue: false })
+        );
+        attachRedisErrorHandler(redis, 'RateLimitRedis');
         rateLimitOpts.redis = redis;
       } catch (err) {
         if (isProd && process.env.ALLOW_INMEMORY_RATE_LIMIT !== 'true') {

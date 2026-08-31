@@ -54,8 +54,11 @@ export function createWebSocketServer(httpServer: HttpServer): SocketIOServer {
       const ioredis = await import('ioredis');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const RedisAny: any = (ioredis as any).Redis || (ioredis as any).default || ioredis;
-      const pubClient = new RedisAny(redisUrl, { maxRetriesPerRequest: null });
+      const { redisOptionsFromUrl, attachRedisErrorHandler } = await import('../../persistence/redis-options.js');
+      const pubClient = new RedisAny(redisOptionsFromUrl(redisUrl, { maxRetriesPerRequest: null }));
+      attachRedisErrorHandler(pubClient, 'SocketIORedisPub');
       const subClient = pubClient.duplicate();
+      attachRedisErrorHandler(subClient, 'SocketIORedisSub');
       const createAdapter = adapterMod.createAdapter || adapterMod.default?.createAdapter;
       if (typeof createAdapter === 'function') {
         io.adapter(createAdapter(pubClient, subClient));

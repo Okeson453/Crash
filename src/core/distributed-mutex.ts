@@ -4,6 +4,7 @@
  */
 
 import Redis from 'ioredis';
+import { redisOptionsFromUrl } from '../persistence/redis-options.js';
 import { getLogger } from '../observability/logger';
 
 export interface DistributedMutexOptions {
@@ -67,11 +68,13 @@ export class DistributedMutex {
     if (options.redisClient) {
       this.redis = options.redisClient;
     } else if (options.redisUrl) {
-      this.redis = new Redis(options.redisUrl, {
-        maxRetriesPerRequest: 2,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-      });
+      this.redis = new Redis(
+        redisOptionsFromUrl(options.redisUrl, {
+          maxRetriesPerRequest: 2,
+          lazyConnect: true,
+          enableOfflineQueue: false,
+        })
+      );
       this.redis.on('error', (err) => {
         this.logger.warn({ component: 'DistributedMutex', error: err.message }, 'Redis client error');
       });
