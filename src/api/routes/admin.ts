@@ -394,20 +394,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  for (const path of [
-    '/billing/subscription',
-    '/billing/usage',
-    '/billing/invoices',
-    '/compliance/self-exclusion',
-    '/compliance/kyc',
-  ] as const) {
-    fastify.get(path, async (_req, reply) => {
-      reply.status(501).send({
-        error: { code: 'NOT_IMPLEMENTED', message: `${path} is not implemented` },
-      });
-    });
-  }
-
   fastify.get('/integrations/telegram', async (_request, reply) => {
     reply.send({
       data: {
@@ -783,7 +769,7 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  // Gate unfinished surfaces with 501 rather than fake data
+  // Gate unfinished surfaces with 501 rather than fake data (single registration only)
   for (const path of [
     '/billing/subscription',
     '/billing/usage',
@@ -791,7 +777,6 @@ export async function adminRoutes(fastify: FastifyInstance): Promise<void> {
     '/compliance/self-exclusion',
     '/compliance/kyc',
     '/compliance/reports',
-    '/integrations/services',
   ] as const) {
     fastify.all(path, async (_req, reply) => {
       reply.status(501).send({
