@@ -92,138 +92,156 @@ function publicUser(user: Tenant | null) {
   };
 }
 
+function bearerToken(request: FastifyRequest): string | null {
+  const value = request.headers.authorization;
+  return value?.startsWith('Bearer ') ? value.slice(7) : null;
+}
+
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
-  await fastify.register(async (scope) => {
-    scope.post('/telegram', async (request, reply) => {
-      const body = telegramAuthSchema.parse(request.body);
-      const initData = verifyTelegramInitData(body.initData);
-      if (!initData.valid || !initData.user) {
+  // Prefix is applied by server.ts: register(authRoutes, { prefix: '/api/v1/auth' })
+  // Do NOT add another prefix here or routes become /api/v1/auth/api/v1/auth/*
+
+  const rateLimit = (await import('@fastify/rate-limit')).default;
+  await fastify.register(rateLimit, {
+    max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20),
+    timeWindow: process.env.AUTH_RATE_LIMIT_WINDOW ?? '1 minute',
+    keyGenerator: (req) => {
+      const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+      return `auth:${Array.isArray(ip) ? ip[0] : ip}`;
+    },
+  });
+
+  fastify.post('/telegram', async (request, reply) => {
+    const body = telegramAuthSchema.parse(request.body);
+    const initData = verifyTelegramInitData(body.initData);
+    if (!initData.valid || !initData.user) {
+      reply.status(401).send({
+        error: { code: 'AUTH_INVALID_INIT_DATA', message: 'Invalid Telegram initData' },
+      });
+      return;
+    }
+    const tenantManager = getTenantManager();
+    const telegramId = String(initData.user.id);
+    const bootstrapRole = resolveBootstrapRole(telegramId);
+    let user = await tenantManager.findUserByTelegramId(telegramId);
+    const isNewUser = !user;
+    if (!user) {
+      user = await tenantManager.createUser({
+        telegramId: initData.user.id,
+        telegramUsername: initData.user.username,
+        firstName: initData.user.first_name,
+        lastName: initData.user.last_name,
+        photoUrl: initData.user.photo_url,
+        role: bootstrapRole ?? 'player',
+      });
+    } else if (
+      bootstrapRole &&
+      (ROLE_RANK[bootstrapRole] ?? 0) > (ROLE_RANK[user.role] ?? 0)
+    ) {
+      await tenantManager.updateUserRole(user.id, bootstrapRole);
+      user = { ...user, role: bootstrapRole };
+    }
+    await tenantManager.updateUserLastSeen(user.id);
+    try {
+      const tid = await tenantManager.ensureOrgTenant(user.id);
+      user = { ...user, tenantId: tid };
+    } catch (err) {
+      const { getLogger } = await import('../../observability/logger.js');
+      getLogger().warn(
+        { component: 'Auth', userId: user.id, error: String(err) },
+        'ensureOrgTenant failed'
+      );
+    }
+    const tokens = await createTokens({
+      id: user.id,
+      telegramId: user.telegramId.toString(),
+      role: user.role,
+      tenantId: user.tenantId ?? null,
+      planId: user.planId,
+    });
+    reply.status(200).send({ data: { user: publicUser(user), tokens, isNewUser } });
+  });
+
+  fastify.post('/refresh', async (request, reply) => {
+    const body = refreshTokenSchema.parse(request.body);
+    try {
+      const { payload } = await jwtVerify(body.refreshToken, REFRESH_SECRET, {
+        algorithms: ['HS256'],
+      });
+      if (payload.type !== 'refresh' || typeof payload.userId !== 'string') {
         reply.status(401).send({
-          error: { code: 'AUTH_INVALID_INIT_DATA', message: 'Invalid Telegram initData' },
+          error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid refresh token' },
         });
         return;
       }
-      const tenantManager = getTenantManager();
-      const telegramId = String(initData.user.id);
-      const bootstrapRole = resolveBootstrapRole(telegramId);
-      let user = await tenantManager.findUserByTelegramId(telegramId);
-      const isNewUser = !user;
+      const tokenHash = hashToken(body.refreshToken);
+      const result = await getPool().query(
+        `UPDATE mini_app_refresh_tokens
+         SET revoked_at = NOW()
+         WHERE token_hash = $1
+           AND user_id = $2
+           AND revoked_at IS NULL
+           AND expires_at > NOW()
+         RETURNING user_id`,
+        [tokenHash, payload.userId]
+      );
+      if (result.rows.length === 0) {
+        reply.status(401).send({
+          error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid or expired refresh token' },
+        });
+        return;
+      }
+      const user = await getTenantManager().findUserById(payload.userId);
       if (!user) {
-        user = await tenantManager.createUser({
-          telegramId: initData.user.id,
-          telegramUsername: initData.user.username,
-          firstName: initData.user.first_name,
-          lastName: initData.user.last_name,
-          photoUrl: initData.user.photo_url,
-          role: bootstrapRole ?? 'player',
-        });
-      } else if (
-        bootstrapRole &&
-        (ROLE_RANK[bootstrapRole] ?? 0) > (ROLE_RANK[user.role] ?? 0)
-      ) {
-        // Promote existing accounts when ADMIN/OPERATOR_TELEGRAM_IDS is set in env
-        await tenantManager.updateUserRole(user.id, bootstrapRole);
-        user = { ...user, role: bootstrapRole };
+        reply.status(401).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+        return;
       }
-      await tenantManager.updateUserLastSeen(user.id);
-      try {
-        const tid = await tenantManager.ensureOrgTenant(user.id);
-        user = { ...user, tenantId: tid };
-      } catch (err) {
-        const { getLogger } = await import('../../observability/logger.js');
-        getLogger().warn(
-          { component: 'Auth', userId: user.id, error: String(err) },
-          'ensureOrgTenant failed'
-        );
-      }
-      const tokens = await createTokens({
-        id: user.id,
-        telegramId: user.telegramId.toString(),
-        role: user.role,
-        tenantId: user.tenantId ?? null,
-        planId: user.planId,
-      });
-      reply.status(200).send({ data: { user: publicUser(user), tokens, isNewUser } });
-    });
-
-    scope.post('/refresh', async (request, reply) => {
-      const body = refreshTokenSchema.parse(request.body);
-      try {
-        const { payload } = await jwtVerify(body.refreshToken, REFRESH_SECRET, {
-          algorithms: ['HS256'],
-        });
-        if (payload.type !== 'refresh' || typeof payload.userId !== 'string') {
-          reply.status(401).send({
-            error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid refresh token' },
-          });
-          return;
-        }
-        const tokenHash = hashToken(body.refreshToken);
-        // P1-05: atomic compare-and-swap revoke
-        const result = await getPool().query(
-          `UPDATE mini_app_refresh_tokens
-           SET revoked_at = NOW()
-           WHERE token_hash = $1
-             AND user_id = $2
-             AND revoked_at IS NULL
-             AND expires_at > NOW()
-           RETURNING id`,
-          [tokenHash, payload.userId]
-        );
-        if (result.rowCount === 0) {
-          reply.status(401).send({
-            error: { code: 'INVALID_REFRESH_TOKEN', message: 'Refresh token revoked or expired' },
-          });
-          return;
-        }
-        const tenantManager = getTenantManager();
-        const user = await tenantManager.findUserById(payload.userId);
-        if (!user) {
-          reply.status(401).send({
-            error: { code: 'USER_NOT_FOUND', message: 'User not found' },
-          });
-          return;
-        }
-        const tokens = await createTokens({
+      reply.status(200).send({
+        data: await createTokens({
           id: user.id,
           telegramId: user.telegramId.toString(),
           role: user.role,
           tenantId: user.tenantId ?? null,
           planId: user.planId,
-        });
-        reply.status(200).send({ data: { user: publicUser(user), tokens } });
-      } catch {
-        reply.status(401).send({
-          error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid refresh token' },
-        });
-      }
-    });
+        }),
+      });
+    } catch {
+      reply.status(401).send({
+        error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid or expired refresh token' },
+      });
+    }
+  });
 
-    scope.post('/logout', { preHandler: authenticateRequest }, async (request, reply) => {
-      const user = (request as FastifyRequest & { user?: { sub: string } }).user;
-      if (user?.sub) {
-        await getPool().query(
-          `UPDATE mini_app_refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
-          [user.sub]
-        );
-        try {
-          const redis = getRedisClient();
-          await redis.set(`revoked:access:${user.sub}`, '1', 'EX', 16 * 60);
-        } catch {
-          /* optional */
+  fastify.post('/logout', { preHandler: authenticateRequest }, async (request, reply) => {
+    const token = bearerToken(request);
+    if (token) {
+      try {
+        await getRedisClient().set(`miniapp:revoked:${hashToken(token)}`, '1', 'EX', 15 * 60);
+      } catch {
+        if (process.env.NODE_ENV === 'production') {
+          reply.status(503).send({
+            error: {
+              code: 'AUTH_STORE_UNAVAILABLE',
+              message: 'Could not revoke session; try again',
+            },
+          });
+          return;
         }
       }
-      reply.status(200).send({ data: { ok: true } });
-    });
+    }
+    await getPool().query(
+      'UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL',
+      [request.auth.userId]
+    );
+    reply.status(204).send();
+  });
 
-    scope.get('/me', { preHandler: authenticateRequest }, async (request, reply) => {
-      const authUser = (request as FastifyRequest & { user?: { sub: string } }).user;
-      if (!authUser?.sub) {
-        reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
-        return;
-      }
-      const user = await getTenantManager().findUserById(authUser.sub);
-      reply.status(200).send({ data: { user: publicUser(user) } });
-    });
-  }, { prefix: '/api/v1/auth' });
+  fastify.get('/me', { preHandler: authenticateRequest }, async (request, reply) => {
+    const user = await getTenantManager().findUserById(request.auth.userId);
+    if (!user) {
+      reply.status(404).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+      return;
+    }
+    reply.status(200).send({ data: publicUser(user) });
+  });
 }
