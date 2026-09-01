@@ -23,6 +23,7 @@ declare module 'fastify' {
 }
 
 import { resolveJwtSecretString } from '@/config/jwt-secret';
+import { elevateRole } from '@/api/auth-bootstrap';
 const JWT_SECRET = resolveJwtSecretString();
 
 export async function authenticateRequest(
@@ -93,10 +94,12 @@ export async function authenticateRequest(
     }
   }
 
+  const telegramId = String(payload.telegramId);
   request.auth = {
     userId: payload.sub as string,
-    telegramId: String(payload.telegramId),
-    role: (payload.role as 'player' | 'operator' | 'admin') || 'player',
+    telegramId,
+    // Env ADMIN_TELEGRAM_IDS etc. override JWT role so admins work without SQL
+    role: elevateRole(String(payload.role ?? 'player'), telegramId),
     tenantId: payload.tenantId ? String(payload.tenantId) : null,
     planId: payload.planId ? String(payload.planId) : null,
   };
@@ -122,10 +125,11 @@ export async function optionalAuth(
     });
 
     if (payload.sub && payload.telegramId) {
+      const telegramId = String(payload.telegramId);
       request.auth = {
-        userId: payload.sub,
-        telegramId: String(payload.telegramId),
-        role: (payload.role as 'player' | 'operator' | 'admin') || 'player',
+        userId: payload.sub as string,
+        telegramId,
+        role: elevateRole(String(payload.role ?? 'player'), telegramId),
         tenantId: payload.tenantId ? String(payload.tenantId) : null,
         planId: payload.planId ? String(payload.planId) : null,
       };
