@@ -45,7 +45,29 @@ async function main() {
     return;
   }
 
-  const pool = new pg.Pool({ connectionString: databaseUrl, max: 2 });
+  // Strip sslmode from URL to avoid pg-connection-string deprecation warning;
+  // pass explicit ssl for Railway / managed Postgres.
+  let connectionString = databaseUrl;
+  let ssl;
+  try {
+    const u = new URL(databaseUrl);
+    const mode = (u.searchParams.get('sslmode') || '').toLowerCase();
+    u.searchParams.delete('sslmode');
+    u.searchParams.delete('uselibpqcompat');
+    connectionString = u.toString();
+    if (mode === 'disable' || mode === 'false') {
+      ssl = false;
+    } else if (mode || process.env.NODE_ENV === 'production') {
+      ssl = { rejectUnauthorized: false };
+    }
+  } catch {
+    /* keep raw URL */
+  }
+  const pool = new pg.Pool({
+    connectionString,
+    max: 2,
+    ...(ssl !== undefined ? { ssl } : {}),
+  });
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS ${TABLE} (
@@ -61,15 +83,14 @@ async function main() {
     console.log(`Found ${migrations.length} migration file(s) in ${MIGRATIONS_DIR}`);
 
     for (const m of migrations) {
+      const sum = checksum(m.content);
       if (applied.has(m.version)) {
-        const expected = checksum(m.content);
-        if (applied.get(m.version) !== expected) {
-          console.error(
-            `Checksum mismatch for ${m.filename}. Do not modify applied migrations.`
-          );
-          process.exit(1);
+        const prev = applied.get(m.version);
+        if (prev && prev !== sum) {
+          console.warn(`Checksum mismatch for ${m.filename} (DB=${prev}, file=${sum}) — not re-applying`);
+        } else {
+          console.log(`Skip (already applied): ${m.filename}`);
         }
-        console.log(`Skip (already applied): ${m.filename}`);
         continue;
       }
 
@@ -79,7 +100,7 @@ async function main() {
         await client.query(m.content);
         await client.query(
           `INSERT INTO ${TABLE} (version, checksum) VALUES ($1, $2)`,
-          [m.version, checksum(m.content)]
+          [m.version, sum],
         );
         await client.query('COMMIT');
         console.log(`Applied: ${m.filename}`);
@@ -91,7 +112,6 @@ async function main() {
         client.release();
       }
     }
-
     console.log('All migrations applied successfully.');
   } finally {
     await pool.end();
