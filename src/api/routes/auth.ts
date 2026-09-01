@@ -10,43 +10,13 @@ import { getRedisClient } from '@/persistence/redis-client';
 import { verifyTelegramInitData } from '@/telegram/mini-app';
 import type { Tenant } from '@/platform/types';
 import { resolveJwtSecretBytes, resolveRefreshSecretBytes } from '@/config/jwt-secret';
+import { resolveBootstrapRole, elevateRole, ROLE_RANK } from '@/api/auth-bootstrap';
 
 const JWT_SECRET = resolveJwtSecretBytes();
 const REFRESH_SECRET = resolveRefreshSecretBytes();
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL = '7d';
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Comma-separated Telegram user IDs allowed as platform admin/operator (Railway env). */
-function parseIdSet(envKey: string): Set<string> {
-  const raw = process.env[envKey] ?? '';
-  return new Set(
-    raw
-      .split(/[,\s]+/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-}
-
-function resolveBootstrapRole(telegramId: string | number): 'admin' | 'operator' | null {
-  const id = String(telegramId);
-  // Accept several common env names so Railway/bot envs still promote mini-app role
-  const adminIds = new Set([
-    ...parseIdSet('ADMIN_TELEGRAM_IDS'),
-    ...parseIdSet('ADMIN_TELEGRAM_ID'),
-    ...parseIdSet('TELEGRAM_ADMIN_IDS'),
-    ...parseIdSet('TELEGRAM_OPERATOR_CHAT_ID'),
-  ]);
-  const operatorIds = new Set([
-    ...parseIdSet('OPERATOR_TELEGRAM_IDS'),
-    ...parseIdSet('OPERATOR_TELEGRAM_ID'),
-  ]);
-  if (adminIds.has(id)) return 'admin';
-  if (operatorIds.has(id)) return 'operator';
-  return null;
-}
-
-const ROLE_RANK: Record<string, number> = { player: 0, operator: 1, admin: 2 };
 
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -202,16 +172,21 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         });
         return;
       }
-      const user = await getTenantManager().findUserById(payload.userId);
+      let user = await getTenantManager().findUserById(payload.userId);
       if (!user) {
         reply.status(401).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
         return;
+      }
+      const elevated = elevateRole(user.role, user.telegramId.toString());
+      if (elevated !== user.role) {
+        await getTenantManager().updateUserRole(user.id, elevated);
+        user = { ...user, role: elevated };
       }
       reply.status(200).send({
         data: await createTokens({
           id: user.id,
           telegramId: user.telegramId.toString(),
-          role: user.role,
+          role: elevated,
           tenantId: user.tenantId ?? null,
           planId: user.planId,
         }),
@@ -248,11 +223,17 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   fastify.get('/me', { preHandler: authenticateRequest }, async (request, reply) => {
-    const user = await getTenantManager().findUserById(request.auth.userId);
+    let user = await getTenantManager().findUserById(request.auth.userId);
     if (!user) {
       reply.status(404).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
       return;
     }
-    reply.status(200).send({ data: publicUser(user) });
+    const elevated = elevateRole(user.role, user.telegramId.toString());
+    if (elevated !== user.role) {
+      await getTenantManager().updateUserRole(user.id, elevated);
+      user = { ...user, role: elevated };
+    }
+    // Prefer elevated role (middleware already elevates request.auth)
+    reply.status(200).send({ data: publicUser({ ...user, role: elevated }) });
   });
 }
