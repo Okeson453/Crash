@@ -45,8 +45,9 @@ export async function main(): Promise<void> {
   });
 
   const apiServer = await createApiServer();
-  await apiServer.listen({ port: config.system.apiPort, host: '0.0.0.0' });
-  logger.info({ port: config.system.apiPort, role }, 'API server listening');
+  const publicPort = Number(process.env.PORT ?? process.env.API_PORT ?? config.system.apiPort);
+  await apiServer.listen({ port: publicPort, host: '0.0.0.0' });
+  logger.info({ port: publicPort, role, railwayPort: process.env.PORT ?? null }, 'API server listening');
   createWebSocketServer(apiServer.server!);
 
   if (process.env.MINI_APP_AUTO_START !== 'false') {
@@ -57,18 +58,26 @@ export async function main(): Promise<void> {
   const shutdown = async () => {
     try {
       await closeWebSocketServer(10_000);
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
     logger.info({ role }, 'Shutting down monolith');
     try {
       miniGameService.stop();
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     try {
       await stop();
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     try {
       await apiServer.close();
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     metricsServer.close();
     process.exit(0);
   };

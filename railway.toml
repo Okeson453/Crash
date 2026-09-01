@@ -3,11 +3,12 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
+# Liveness only — must stay on the process that binds $PORT (API server).
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 
-# Public HTTP: map to metrics/health server (default 9090).
-# Set METRICS_PORT=$PORT in Railway variables so the app binds the platform port.
-# /health is liveness (process up). Use /health/ready for readiness (browser/session operational).
+# Railway injects PORT. The app binds the API (including /health) to PORT when set.
+# Do not set METRICS_PORT=$PORT unless you want metrics-only on that port.
+# Optional: API_PORT overrides when PORT is unset (local/docker).

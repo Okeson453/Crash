@@ -12,6 +12,13 @@ import { createWebSocketServer, closeWebSocketServer } from '../api/websocket/se
 import { getLogger } from '../observability/logger.js';
 import { startMiniGameEventRelay } from '../mini-app/game-event-relay.js';
 
+/** Railway injects PORT — always prefer it for the public HTTP listener. */
+function resolvePublicPort(configApiPort: number): number {
+  const fromEnv = Number(process.env.PORT ?? process.env.API_PORT ?? '');
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return configApiPort;
+}
+
 export async function main(): Promise<void> {
   const config = bootConfig();
   process.env.PROCESS_ROLE = 'control-plane';
@@ -22,39 +29,54 @@ export async function main(): Promise<void> {
 
   const logger = getLogger();
   const role = roleLabel(config);
+  const publicPort = resolvePublicPort(config.system.apiPort);
+  const metricsPort = Number(process.env.METRICS_PORT ?? 9090);
+  const useSeparateMetrics = metricsPort !== publicPort;
 
-  const metricsServer = http.createServer(async (req, res) => {
-    if (req.url === '/health') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          status: 'ok',
-          role: 'control-plane',
-          version: '1.1.0',
-          miniGame: 'external',
-        })
-      );
-      return;
-    }
-    if (req.url === '/metrics') {
-      res.writeHead(200, { 'Content-Type': register.contentType });
-      res.end(await register.metrics());
-      return;
-    }
-    res.writeHead(404);
-    res.end('Not found');
-  });
+  let metricsServer: http.Server | null = null;
+  if (useSeparateMetrics) {
+    metricsServer = http.createServer(async (req, res) => {
+      if (req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: 'ok',
+            role: 'control-plane',
+            version: process.env.APP_VERSION ?? '1.1.0',
+            miniGame: 'external',
+          })
+        );
+        return;
+      }
+      if (req.url === '/metrics') {
+        res.writeHead(200, { 'Content-Type': register.contentType });
+        res.end(await register.metrics());
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
+    });
+  }
 
   await start(); // composition gates skip automation when PROCESS_ROLE=control-plane
 
-  const metricsPort = Number(process.env.METRICS_PORT ?? 9090);
-  metricsServer.listen(metricsPort, () => {
-    logger.info({ port: metricsPort, role }, 'Metrics server listening');
-  });
+  if (metricsServer) {
+    await new Promise<void>((resolve, reject) => {
+      metricsServer!.once('error', reject);
+      metricsServer!.listen(metricsPort, () => {
+        logger.info({ port: metricsPort, role }, 'Metrics server listening');
+        resolve();
+      });
+    });
+  }
 
   const apiServer = await createApiServer();
-  await apiServer.listen({ port: config.system.apiPort, host: '0.0.0.0' });
-  logger.info({ port: config.system.apiPort, role }, 'API server listening');
+  // Bind 0.0.0.0 so Railway edge health checks can reach the process.
+  await apiServer.listen({ port: publicPort, host: '0.0.0.0' });
+  logger.info(
+    { port: publicPort, role, railwayPort: process.env.PORT ?? null },
+    'API server listening'
+  );
 
   createWebSocketServer(apiServer.server!);
   logger.info({ role }, 'WebSocket server started');
@@ -69,16 +91,22 @@ export async function main(): Promise<void> {
   const shutdown = async () => {
     try {
       await closeWebSocketServer(10_000);
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
     logger.info({ role }, 'Shutting down control-plane');
     try {
       await stop();
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     try {
       await apiServer.close();
-    } catch { /* */ }
-    metricsServer.close();
+    } catch {
+      /* */
+    }
+    metricsServer?.close();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown());
