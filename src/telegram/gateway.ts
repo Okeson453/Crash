@@ -155,6 +155,40 @@ export class TelegramGateway {
         return next();
       });
 
+      // Restore official Telegram command menu (slash menu)
+      try {
+        await this.bot.telegram.setMyCommands([
+          { command: 'start', description: 'Open operator menu' },
+          { command: 'menu', description: 'Show main menu' },
+          { command: 'help', description: 'List all commands' },
+          { command: 'login', description: 'Connect BC.Game account' },
+          { command: 'status', description: 'Operator dashboard' },
+          { command: 'balance', description: 'Current balance' },
+          { command: 'daily', description: 'Daily stats' },
+          { command: 'session', description: 'Session summary' },
+          { command: 'pnl', description: 'Profit and loss' },
+          { command: 'entries', description: 'Recent entries' },
+          { command: 'health', description: 'System health' },
+          { command: 'lastround', description: 'Last round result' },
+          { command: 'pause', description: 'Pause automation' },
+          { command: 'resume', description: 'Resume automation' },
+          { command: 'stop', description: 'Graceful stop' },
+          { command: 'emergencystop', description: 'Emergency stop' },
+          { command: 'mode', description: 'Show or set mode' },
+          { command: 'sheath', description: 'Sheath (safe mode)' },
+          { command: 'unsheath', description: 'Unsheath engine' },
+          { command: 'config', description: 'View configuration' },
+          { command: 'analytics', description: 'ACIE / signals' },
+          { command: 'login_cancel', description: 'Cancel login flow' },
+        ]);
+        logger.info({ component: 'TelegramGateway' }, 'Telegram bot commands registered (setMyCommands)');
+      } catch (err) {
+        logger.warn(
+          { component: 'TelegramGateway', error: err instanceof Error ? err.message : String(err) },
+          'setMyCommands failed — slash menu may be empty; handlers still work'
+        );
+      }
+
       if (this.config.webhookUrl) {
         const webhookPath = new URL(this.config.webhookUrl).pathname;
         await this.bot.launch({
