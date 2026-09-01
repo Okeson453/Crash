@@ -13,7 +13,7 @@ import { CrashOverlay } from '@/components/game/CrashOverlay';
 import { SkeletonCard } from '@/components/ui/Skeleton';
 import { useTelegram } from '@/hooks/useTelegram';
 import { useCashout } from '@/hooks/useCashout';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGameUIState } from '@/hooks/game/useGameUIState';
 import { useGameStore } from '@/stores/gameStore';
 import { BetPendingState } from '@/components/betting/BetPendingState';
@@ -30,10 +30,17 @@ export function GameScreen() {
   const { useMainButton: bindMainButton } = useTelegram();
   const { canCashout, manualCashout } = useCashout();
   useRealtimeGame();
+
+  // Keep cashout handler stable so MainButton effect does not re-bind every render
+  const manualCashoutRef = useRef(manualCashout);
+  manualCashoutRef.current = manualCashout;
+
   useEffect(() => {
-    if (canCashout) return bindMainButton('Cash Out', manualCashout, true);
+    if (canCashout) {
+      return bindMainButton('Cash Out', () => manualCashoutRef.current(), true);
+    }
     return bindMainButton('Place Bet', () => undefined, false);
-  }, [canCashout, manualCashout, bindMainButton]);
+  }, [canCashout, bindMainButton]);
 
   const showBetPanel = ui.canPlaceBet;
   const showCashout = ui.canCashout;
