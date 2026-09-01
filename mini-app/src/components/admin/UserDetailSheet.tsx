@@ -58,7 +58,7 @@ export function UserDetailSheet({ user, onClose }: UserDetailSheetProps) {
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             {user.photoUrl ? (
-              <img src={user.photoUrl} alt="" className="h-14 w-14 rounded-full object-cover" />
+              <img src={user.photoUrl} alt="" className="h-14 w-14 rounded-full object-cover" width={56} height={56} loading="lazy" decoding="async" />
             ) : (
               <div className="h-14 w-14 rounded-full bg-tg-hint/20 flex items-center justify-center text-lg font-bold text-tg-hint">
                 {user.firstName[0]}
