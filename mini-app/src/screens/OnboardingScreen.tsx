@@ -61,6 +61,9 @@ export function OnboardingScreen() {
             className="w-full h-full object-cover"
             width={112}
             height={112}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
           />
         </div>
         <h1 className="text-3xl font-black text-tg-text mb-2">CrashWave</h1>

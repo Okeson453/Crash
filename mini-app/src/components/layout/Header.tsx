@@ -60,6 +60,9 @@ export function Header() {
                 className="w-7 h-7 rounded-full object-cover"
                 width={28}
                 height={28}
+                loading="lazy"
+                decoding="async"
+                fetchPriority="low"
               />
             )}
             <h1 className="text-lg font-semibold text-tg-text">{title}</h1>
@@ -77,6 +80,10 @@ export function Header() {
                 src={user.photoUrl}
                 alt={user.firstName}
                 className="w-8 h-8 rounded-full object-cover"
+                width={32}
+                height={32}
+                loading="lazy"
+                decoding="async"
               />
             ) : (
               <div className="w-8 h-8 rounded-full bg-tg-button flex items-center justify-center">
