@@ -99,18 +99,26 @@ export function useTelegram() {
     [webApp]
   );
 
-  const setHeaderColor = useCallback(
-    (color: string) => {
-      setTelegramHeaderColor(color);
-    },
-    []
-  );
+  const setHeaderColor = useCallback((color: string) => {
+    setTelegramHeaderColor(color);
+  }, []);
 
-  const setBackgroundColor = useCallback(
-    (color: string) => {
-      setTelegramBackgroundColor(color);
+  const setBackgroundColor = useCallback((color: string) => {
+    setTelegramBackgroundColor(color);
+  }, []);
+
+  const useMainButton = useCallback(
+    (text: string, onClick: () => void, active = true) => {
+      if (!webApp) return () => undefined;
+      webApp.MainButton.setText(text);
+      webApp.MainButton.setParams({ is_active: active, is_visible: true });
+      webApp.MainButton.onClick(onClick);
+      return () => {
+        webApp.MainButton.offClick(onClick);
+        webApp.MainButton.hide();
+      };
     },
-    []
+    [webApp]
   );
 
   return {
@@ -128,10 +136,6 @@ export function useTelegram() {
     setBackgroundColor,
     expand: () => webApp?.expand(),
     close: () => webApp?.close(),
-    useMainButton: (text: string, onClick: () => void, active = true) => {
-      if (!webApp) return () => undefined;
-      webApp.MainButton.setText(text); webApp.MainButton.setParams({ is_active: active, is_visible: true }); webApp.MainButton.onClick(onClick);
-      return () => { webApp.MainButton.offClick(onClick); webApp.MainButton.hide(); };
-    },
+    useMainButton,
   };
 }
