@@ -30,8 +30,19 @@ function parseIdSet(envKey: string): Set<string> {
 
 function resolveBootstrapRole(telegramId: string | number): 'admin' | 'operator' | null {
   const id = String(telegramId);
-  if (parseIdSet('ADMIN_TELEGRAM_IDS').has(id)) return 'admin';
-  if (parseIdSet('OPERATOR_TELEGRAM_IDS').has(id)) return 'operator';
+  // Accept several common env names so Railway/bot envs still promote mini-app role
+  const adminIds = new Set([
+    ...parseIdSet('ADMIN_TELEGRAM_IDS'),
+    ...parseIdSet('ADMIN_TELEGRAM_ID'),
+    ...parseIdSet('TELEGRAM_ADMIN_IDS'),
+    ...parseIdSet('TELEGRAM_OPERATOR_CHAT_ID'),
+  ]);
+  const operatorIds = new Set([
+    ...parseIdSet('OPERATOR_TELEGRAM_IDS'),
+    ...parseIdSet('OPERATOR_TELEGRAM_ID'),
+  ]);
+  if (adminIds.has(id)) return 'admin';
+  if (operatorIds.has(id)) return 'operator';
   return null;
 }
 
