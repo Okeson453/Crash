@@ -93,3 +93,26 @@ export function OnboardingScreen() {
             </p>
           </div>
         )}
+
+        <button
+          onClick={handleStart}
+          disabled={isLoading}
+          className="w-full btn-primary py-4 text-lg"
+        >
+          {isLoading ? (
+            <span className="flex items-center justify-center gap-2">
+              <LoadingSpinner size="sm" />
+              Connecting...
+            </span>
+          ) : (
+            `Start Playing${getTelegramUserNormalized()?.firstName ? `, ${getTelegramUserNormalized()?.firstName}` : ''}`
+          )}
+        </button>
+
+        <p className="text-center text-xs text-tg-hint">
+          By continuing, you agree to our Terms of Service
+        </p>
+      </div>
+    </div>
+  );
+}
