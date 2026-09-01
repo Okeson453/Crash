@@ -89,7 +89,6 @@ export class TenantManager {
     return { tenant, created: true };
   }
 
-
   async findUserByTelegramId(telegramId: string): Promise<Tenant | null> {
     return this.getUserByTelegramId(BigInt(telegramId));
   }
@@ -122,7 +121,6 @@ export class TenantManager {
     return result.rows.map((row) => ({ id: String(row.id), actorType: String(row.actor_type), actorId: row.actor_id ? String(row.actor_id) : '', action: String(row.action), targetUserId: row.target_user_id ? String(row.target_user_id) : null, payload: row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {}, createdAt: new Date(row.created_at as string | number | Date).toISOString() }));
   }
 
-
   async getUserById(id: string): Promise<Tenant | null> {
     const result = await getPool().query('SELECT * FROM users WHERE id = $1', [id]);
     if (result.rows.length === 0) return null;
@@ -135,6 +133,11 @@ export class TenantManager {
       id,
     ]);
     this.logger.info({ component: 'TenantManager', userId: id, status }, 'User status updated');
+  }
+
+  async updateUserRole(id: string, role: 'player' | 'operator' | 'admin'): Promise<void> {
+    await getPool().query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [role, id]);
+    this.logger.info({ component: 'TenantManager', userId: id, role }, 'User role updated');
   }
 
   async assignPlan(userId: string, planId: string): Promise<void> {
