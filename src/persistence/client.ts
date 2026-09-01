@@ -12,41 +12,92 @@ export interface DatabaseConfig {
 
 let pool: Pool | null = null;
 
+/**
+ * Normalize DATABASE_URL SSL params so pg-connection-string does not emit the
+ * "prefer/require/verify-ca treated as verify-full" deprecation warning.
+ * Explicit `ssl` Pool option is the source of truth.
+ */
+function normalizeConnectionString(raw: string): { connectionString: string; urlSslMode: string | null } {
+  try {
+    const u = new URL(raw);
+    const urlSslMode = (u.searchParams.get('sslmode') ?? '').toLowerCase() || null;
+    // Drop legacy sslmode / uselibpqcompat so the driver does not warn on parse.
+    u.searchParams.delete('sslmode');
+    u.searchParams.delete('uselibpqcompat');
+    // pg URL form uses postgresql://
+    return { connectionString: u.toString(), urlSslMode };
+  } catch {
+    return { connectionString: raw, urlSslMode: null };
+  }
+}
+
+function resolveSsl(
+  urlSslMode: string | null
+): boolean | { rejectUnauthorized: boolean } | undefined {
+  const sslMode = (
+    process.env.DATABASE_SSL_MODE ??
+    process.env.PGSSLMODE ??
+    urlSslMode ??
+    ''
+  ).toLowerCase();
+
+  if (sslMode === 'disable' || sslMode === 'false') {
+    return false;
+  }
+  // Railway / managed Postgres typically need TLS without public CA verification.
+  if (sslMode === 'require' || sslMode === 'prefer' || sslMode === 'no-verify') {
+    return { rejectUnauthorized: false };
+  }
+  if (sslMode === 'verify-full' || sslMode === 'verify-ca') {
+    return { rejectUnauthorized: true };
+  }
+  // Production default: encrypt, do not fail closed on private CA unless asked.
+  if (process.env.NODE_ENV === 'production') {
+    return { rejectUnauthorized: false };
+  }
+  return undefined;
+}
+
+function buildPoolOptions(config: DatabaseConfig): ConstructorParameters<typeof Pool>[0] {
+  const { connectionString, urlSslMode } = normalizeConnectionString(config.connectionString);
+  const ssl = resolveSsl(urlSslMode);
+  const timeoutMs =
+    config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000);
+  // Set statement_timeout via libpq startup options — never fire client.query in
+  // pool 'connect' (that races the caller's first query and triggers pg@9 deprecation).
+  const safeTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 15_000;
+
+  return {
+    connectionString,
+    max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? process.env.DB_POOL_SIZE ?? 10),
+    idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
+    connectionTimeoutMillis:
+      config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
+    options: `-c statement_timeout=${safeTimeout}`,
+    ...(ssl !== undefined ? { ssl } : {}),
+  };
+}
+
 export function createPool(config: DatabaseConfig): Pool {
   if (pool) {
     return pool;
   }
 
-  // Explicit SSL mode — avoid silent pg SSL downgrade warnings.
-  // Prefer verify-full in production when CA is configured.
-  const sslMode = (process.env.DATABASE_SSL_MODE ?? process.env.PGSSLMODE ?? '').toLowerCase();
-  const ssl =
-    sslMode === 'disable' || sslMode === 'false'
-      ? false
-      : sslMode === 'require' || sslMode === 'no-verify'
-        ? { rejectUnauthorized: false }
-        : sslMode === 'verify-full' || sslMode === 'verify-ca' || process.env.NODE_ENV === 'production'
-          ? { rejectUnauthorized: true }
-          : undefined;
-
-  pool = new Pool({
-    connectionString: config.connectionString,
-    max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? process.env.DB_POOL_SIZE ?? 10),
-    idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
-    connectionTimeoutMillis: config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
-    ...(ssl !== undefined ? { ssl } : {}),
-  });
+  const opts = buildPoolOptions(config);
+  pool = new Pool(opts);
 
   pool.on('error', (err) => {
     getLogger().error({ component: 'Database' }, `Unexpected database pool error: ${err.message}`);
   });
 
-  // Do NOT run concurrent client.query() in the connect handler — that races the
-  // consumer's first query. Tenant GUCs are applied in withTenantContext / query paths.
-  pool.on('connect', (client) => {
-    const timeoutMs = config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000);
-    void client.query(`SET statement_timeout = ${timeoutMs}`).catch(() => undefined);
-    getLogger().debug({ component: 'Database', statementTimeoutMs: timeoutMs }, 'New database connection established');
+  pool.on('connect', () => {
+    getLogger().debug(
+      {
+        component: 'Database',
+        statementTimeoutMs: config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000),
+      },
+      'New database connection established'
+    );
   });
 
   return pool;
@@ -129,7 +180,6 @@ export async function healthCheck(): Promise<boolean> {
   }
 }
 
-
 /** Close and clear singleton — allows re-init with different config (tests / multi-tenant workers) */
 export async function resetPool(): Promise<void> {
   if (pool) {
@@ -140,11 +190,5 @@ export async function resetPool(): Promise<void> {
 
 /** Create a non-singleton pool for isolated tenants / workers */
 export function createIsolatedPool(config: DatabaseConfig): Pool {
-  return new Pool({
-    connectionString: config.connectionString,
-    max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? 10),
-    idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
-    connectionTimeoutMillis:
-      config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
-  });
+  return new Pool(buildPoolOptions(config));
 }
