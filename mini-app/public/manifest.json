@@ -4,8 +4,8 @@
   "description": "CrashWave Telegram Mini App - Provably Fair Crash Game",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2481cc",
+  "background_color": "#0a1628",
+  "theme_color": "#0ea5e9",
   "orientation": "portrait",
   "scope": "/",
   "icons": [

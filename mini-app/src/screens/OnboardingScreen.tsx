@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useTelegram } from '@/hooks/useTelegram';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getTelegramUserNormalized } from '@/lib/telegram';
-import { Gamepad2, Shield, Zap, TrendingUp } from 'lucide-react';
+import { Shield, Zap, TrendingUp } from 'lucide-react';
 import { LoadingSpinner } from '@/components/ui/Spinner';
 
 const FEATURES = [
@@ -54,8 +54,14 @@ export function OnboardingScreen() {
     <div className="flex flex-col min-h-screen px-6 py-8">
       {/* Logo */}
       <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="w-20 h-20 rounded-2xl bg-tg-button flex items-center justify-center mb-6">
-          <Gamepad2 className="w-10 h-10 text-tg-button-text" />
+        <div className="w-28 h-28 rounded-full overflow-hidden mb-6 shadow-lg ring-2 ring-tg-button/30">
+          <img
+            src="/brand/logo.svg"
+            alt="CrashWave"
+            className="w-full h-full object-cover"
+            width={112}
+            height={112}
+          />
         </div>
         <h1 className="text-3xl font-black text-tg-text mb-2">CrashWave</h1>
         <p className="text-center text-tg-hint mb-8 max-w-xs">
@@ -87,26 +93,3 @@ export function OnboardingScreen() {
             </p>
           </div>
         )}
-
-        <button
-          onClick={handleStart}
-          disabled={isLoading}
-          className="w-full btn-primary py-4 text-lg"
-        >
-          {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <LoadingSpinner size="sm" />
-              Connecting...
-            </span>
-          ) : (
-            `Start Playing${getTelegramUserNormalized()?.firstName ? `, ${getTelegramUserNormalized()?.firstName}` : ''}`
-          )}
-        </button>
-
-        <p className="text-center text-xs text-tg-hint">
-          By continuing, you agree to our Terms of Service
-        </p>
-      </div>
-    </div>
-  );
-}

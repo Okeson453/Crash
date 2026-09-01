@@ -52,7 +52,18 @@ export function Header() {
               <ArrowLeft className="w-5 h-5 text-tg-text" />
             </button>
           )}
-          <h1 className="text-lg font-semibold text-tg-text">{title}</h1>
+          <div className="flex items-center gap-2">
+            {!showBack && (
+              <img
+                src="/brand/logo.svg"
+                alt=""
+                className="w-7 h-7 rounded-full object-cover"
+                width={28}
+                height={28}
+              />
+            )}
+            <h1 className="text-lg font-semibold text-tg-text">{title}</h1>
+          </div>
         </div>
 
         {isAuthenticated && (
