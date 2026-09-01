@@ -3,23 +3,42 @@ import type { RouterDependencies } from '../router';
 
 /** Plain text — no Markdown (avoids Telegram 400 parse entities). */
 const MENU_TEXT = [
-  '🚀 BC.Game Crash Automation',
+  '🚀 CrashWave Operator Bot',
   '',
-  'Welcome to your private Crash analytics workspace.',
+  'Primary control plane (Telegram commands).',
   '',
-  'Choose an action:',
+  '— Getting started —',
+  '/start  · this menu',
+  '/menu   · same as start',
+  '/help   · command list',
+  '/login  · connect BC.Game (secure)',
   '',
-  '🔐 Connect BC.Game — /login',
-  '📊 Dashboard — /status',
-  '🧠 ACIE / Signals — /analytics',
-  '🧪 Dry Run — set APP_SYSTEM__MODE=dry-run',
-  '⚙️ Settings — /config',
-  '📡 System Status — /health',
-  '❓ Help — /help',
+  '— Status —',
+  '/status /balance /daily /session',
+  '/pnl /entries /health /lastround',
   '',
-  'Also: /balance /daily /session /pause /resume',
+  '— Control —',
+  '/pause /resume /stop /emergencystop',
+  '/mode /sheath /unsheath',
   '',
+  '— Config & analytics —',
+  '/config /analytics',
+  '',
+  'Tip: type / and pick a command from Telegram’s menu.',
   'Passwords are never stored or logged.',
+].join('\n');
+
+const HELP_TEXT = [
+  'CrashWave — all bot commands',
+  '',
+  'Status:   /status /balance /daily /session /pnl /entries /health /lastround',
+  'Control:  /pause /resume /stop /emergencystop /mode /sheath /unsheath',
+  'Config:   /config',
+  'Signals:  /analytics',
+  'Auth:     /login /login_cancel',
+  'Nav:      /start /menu /help',
+  '',
+  'Need the dashboard? /status is the main operator view.',
 ].join('\n');
 
 export function createStartHandlers(deps: RouterDependencies): Map<string, CommandHandler> {
@@ -27,13 +46,12 @@ export function createStartHandlers(deps: RouterDependencies): Map<string, Comma
 
   handlers.set('/start', async (ctx: OperatorContext): Promise<CommandResult> => {
     try {
-      if (!ctx.tenantId || !deps.tenantRuntimeFactory) {
-        return { success: true, message: MENU_TEXT };
+      if (ctx.tenantId && deps.tenantRuntimeFactory) {
+        void deps.tenantRuntimeFactory
+          .getOrCreate(ctx.tenantId)
+          .then((runtime) => runtime.start())
+          .catch(() => undefined);
       }
-      void deps.tenantRuntimeFactory
-        .getOrCreate(ctx.tenantId)
-        .then((runtime) => runtime.start())
-        .catch(() => undefined);
       return { success: true, message: MENU_TEXT };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -49,7 +67,7 @@ export function createStartHandlers(deps: RouterDependencies): Map<string, Comma
   });
 
   handlers.set('/help', async (_ctx: OperatorContext): Promise<CommandResult> => {
-    return { success: true, message: MENU_TEXT };
+    return { success: true, message: HELP_TEXT };
   });
 
   return handlers;
