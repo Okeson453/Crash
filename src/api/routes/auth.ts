@@ -17,6 +17,26 @@ const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL = '7d';
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Comma-separated Telegram user IDs allowed as platform admin/operator (Railway env). */
+function parseIdSet(envKey: string): Set<string> {
+  const raw = process.env[envKey] ?? '';
+  return new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+function resolveBootstrapRole(telegramId: string | number): 'admin' | 'operator' | null {
+  const id = String(telegramId);
+  if (parseIdSet('ADMIN_TELEGRAM_IDS').has(id)) return 'admin';
+  if (parseIdSet('OPERATOR_TELEGRAM_IDS').has(id)) return 'operator';
+  return null;
+}
+
+const ROLE_RANK: Record<string, number> = { player: 0, operator: 1, admin: 2 };
+
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -72,24 +92,8 @@ function publicUser(user: Tenant | null) {
   };
 }
 
-function bearerToken(request: FastifyRequest): string | null {
-  const value = request.headers.authorization;
-  return value?.startsWith('Bearer ') ? value.slice(7) : null;
-}
-
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
-  // Stricter rate limits on auth (brute-force protection)
   await fastify.register(async (scope) => {
-    const rateLimit = (await import('@fastify/rate-limit')).default;
-    await scope.register(rateLimit, {
-      max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20),
-      timeWindow: process.env.AUTH_RATE_LIMIT_WINDOW ?? '1 minute',
-      keyGenerator: (req) => {
-        const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
-        return `auth:${Array.isArray(ip) ? ip[0] : ip}`;
-      },
-    });
-
     scope.post('/telegram', async (request, reply) => {
       const body = telegramAuthSchema.parse(request.body);
       const initData = verifyTelegramInitData(body.initData);
@@ -100,7 +104,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return;
       }
       const tenantManager = getTenantManager();
-      let user = await tenantManager.findUserByTelegramId(String(initData.user.id));
+      const telegramId = String(initData.user.id);
+      const bootstrapRole = resolveBootstrapRole(telegramId);
+      let user = await tenantManager.findUserByTelegramId(telegramId);
       const isNewUser = !user;
       if (!user) {
         user = await tenantManager.createUser({
@@ -109,8 +115,15 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           firstName: initData.user.first_name,
           lastName: initData.user.last_name,
           photoUrl: initData.user.photo_url,
-          role: 'player',
+          role: bootstrapRole ?? 'player',
         });
+      } else if (
+        bootstrapRole &&
+        (ROLE_RANK[bootstrapRole] ?? 0) > (ROLE_RANK[user.role] ?? 0)
+      ) {
+        // Promote existing accounts when ADMIN/OPERATOR_TELEGRAM_IDS is set in env
+        await tenantManager.updateUserRole(user.id, bootstrapRole);
+        user = { ...user, role: bootstrapRole };
       }
       await tenantManager.updateUserLastSeen(user.id);
       try {
@@ -154,67 +167,63 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
              AND user_id = $2
              AND revoked_at IS NULL
              AND expires_at > NOW()
-           RETURNING user_id`,
+           RETURNING id`,
           [tokenHash, payload.userId]
         );
-        if (result.rows.length === 0) {
+        if (result.rowCount === 0) {
           reply.status(401).send({
-            error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid or expired refresh token' },
+            error: { code: 'INVALID_REFRESH_TOKEN', message: 'Refresh token revoked or expired' },
           });
           return;
         }
-        const user = await getTenantManager().findUserById(payload.userId);
+        const tenantManager = getTenantManager();
+        const user = await tenantManager.findUserById(payload.userId);
         if (!user) {
-          reply.status(401).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+          reply.status(401).send({
+            error: { code: 'USER_NOT_FOUND', message: 'User not found' },
+          });
           return;
         }
-        reply.status(200).send({
-          data: await createTokens({
-            id: user.id,
-            telegramId: user.telegramId.toString(),
-            role: user.role,
-            tenantId: user.tenantId ?? null,
-            planId: user.planId,
-          }),
+        const tokens = await createTokens({
+          id: user.id,
+          telegramId: user.telegramId.toString(),
+          role: user.role,
+          tenantId: user.tenantId ?? null,
+          planId: user.planId,
         });
+        reply.status(200).send({ data: { user: publicUser(user), tokens } });
       } catch {
         reply.status(401).send({
-          error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid or expired refresh token' },
+          error: { code: 'INVALID_REFRESH_TOKEN', message: 'Invalid refresh token' },
         });
       }
     });
 
     scope.post('/logout', { preHandler: authenticateRequest }, async (request, reply) => {
-      const token = bearerToken(request);
-      if (token) {
+      const user = (request as FastifyRequest & { user?: { sub: string } }).user;
+      if (user?.sub) {
+        await getPool().query(
+          `UPDATE mini_app_refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
+          [user.sub]
+        );
         try {
-          await getRedisClient().set(`miniapp:revoked:${hashToken(token)}`, '1', 'EX', 15 * 60);
+          const redis = getRedisClient();
+          await redis.set(`revoked:access:${user.sub}`, '1', 'EX', 16 * 60);
         } catch {
-          if (process.env.NODE_ENV === 'production') {
-            reply.status(503).send({
-              error: {
-                code: 'AUTH_STORE_UNAVAILABLE',
-                message: 'Could not revoke session; try again',
-              },
-            });
-            return;
-          }
+          /* optional */
         }
       }
-      await getPool().query(
-        'UPDATE mini_app_refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL',
-        [request.auth.userId]
-      );
-      reply.status(204).send();
+      reply.status(200).send({ data: { ok: true } });
     });
 
     scope.get('/me', { preHandler: authenticateRequest }, async (request, reply) => {
-      const user = await getTenantManager().findUserById(request.auth.userId);
-      if (!user) {
-        reply.status(404).send({ error: { code: 'USER_NOT_FOUND', message: 'User not found' } });
+      const authUser = (request as FastifyRequest & { user?: { sub: string } }).user;
+      if (!authUser?.sub) {
+        reply.status(401).send({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } });
         return;
       }
-      reply.status(200).send({ data: publicUser(user) });
+      const user = await getTenantManager().findUserById(authUser.sub);
+      reply.status(200).send({ data: { user: publicUser(user) } });
     });
-  });
+  }, { prefix: '/api/v1/auth' });
 }
