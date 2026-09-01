@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { getLogger } from '../../observability/logger';
 import { EventBus } from './bus';
 
@@ -31,8 +31,9 @@ export class OutboxPublisher {
     if (this.running) return;
     if (Date.now() < this.nextAllowedAt) return;
     this.running = true;
-    const client = await this.pool.connect();
+    let client: PoolClient | null = null;
     try {
+      client = await this.pool.connect();
       // Platform GUC so any non-SECURITY-DEFINER paths / policies still allow access.
       await client.query(`SELECT set_config('app.platform_role', 'control_plane', true)`);
 
@@ -69,11 +70,10 @@ export class OutboxPublisher {
       }
     } catch (error) {
       this.consecutiveFailures += 1;
-      // Exponential backoff up to 30s to avoid log floods when DB/RLS is misconfigured.
       const backoffMs = Math.min(30_000, this.intervalMs * 2 ** Math.min(this.consecutiveFailures, 5));
       this.nextAllowedAt = Date.now() + backoffMs;
 
-      const err = error as { message?: string; code?: string; detail?: string; severity?: string };
+      const err = error as { message?: string; code?: string; detail?: string };
       this.logger.warn(
         {
           component: 'OutboxPublisher',
@@ -86,7 +86,7 @@ export class OutboxPublisher {
         'Outbox poll failed',
       );
     } finally {
-      client.release();
+      client?.release();
       this.running = false;
     }
   }

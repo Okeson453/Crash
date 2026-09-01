@@ -17,14 +17,15 @@ let pool: Pool | null = null;
  * "prefer/require/verify-ca treated as verify-full" deprecation warning.
  * Explicit `ssl` Pool option is the source of truth.
  */
-function normalizeConnectionString(raw: string): { connectionString: string; urlSslMode: string | null } {
+export function normalizeConnectionString(raw: string): {
+  connectionString: string;
+  urlSslMode: string | null;
+} {
   try {
     const u = new URL(raw);
     const urlSslMode = (u.searchParams.get('sslmode') ?? '').toLowerCase() || null;
-    // Drop legacy sslmode / uselibpqcompat so the driver does not warn on parse.
     u.searchParams.delete('sslmode');
     u.searchParams.delete('uselibpqcompat');
-    // pg URL form uses postgresql://
     return { connectionString: u.toString(), urlSslMode };
   } catch {
     return { connectionString: raw, urlSslMode: null };
@@ -44,14 +45,13 @@ function resolveSsl(
   if (sslMode === 'disable' || sslMode === 'false') {
     return false;
   }
-  // Railway / managed Postgres typically need TLS without public CA verification.
+  // Railway / managed Postgres: TLS on, private CA — do not require public CA verify.
   if (sslMode === 'require' || sslMode === 'prefer' || sslMode === 'no-verify') {
     return { rejectUnauthorized: false };
   }
   if (sslMode === 'verify-full' || sslMode === 'verify-ca') {
     return { rejectUnauthorized: true };
   }
-  // Production default: encrypt, do not fail closed on private CA unless asked.
   if (process.env.NODE_ENV === 'production') {
     return { rejectUnauthorized: false };
   }
@@ -61,19 +61,17 @@ function resolveSsl(
 function buildPoolOptions(config: DatabaseConfig): ConstructorParameters<typeof Pool>[0] {
   const { connectionString, urlSslMode } = normalizeConnectionString(config.connectionString);
   const ssl = resolveSsl(urlSslMode);
-  const timeoutMs =
-    config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000);
-  // Set statement_timeout via libpq startup options — never fire client.query in
-  // pool 'connect' (that races the caller's first query and triggers pg@9 deprecation).
-  const safeTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : 15_000;
 
+  // Do NOT pass `options: -c statement_timeout=...`.
+  // Railway Postgres / PgBouncer reject it:
+  //   FATAL: unsupported startup parameter in options: statement_timeout
+  // Per-query timeouts can be applied by callers when needed.
   return {
     connectionString,
     max: config.poolSize ?? Number(process.env.DATABASE_POOL_SIZE ?? process.env.DB_POOL_SIZE ?? 10),
     idleTimeoutMillis: config.idleTimeoutMillis ?? Number(process.env.PG_IDLE_TIMEOUT_MS ?? 30_000),
     connectionTimeoutMillis:
       config.connectionTimeoutMillis ?? Number(process.env.PG_CONNECTION_TIMEOUT_MS ?? 5_000),
-    options: `-c statement_timeout=${safeTimeout}`,
     ...(ssl !== undefined ? { ssl } : {}),
   };
 }
@@ -91,13 +89,7 @@ export function createPool(config: DatabaseConfig): Pool {
   });
 
   pool.on('connect', () => {
-    getLogger().debug(
-      {
-        component: 'Database',
-        statementTimeoutMs: config.queryTimeoutMillis ?? Number(process.env.PG_STATEMENT_TIMEOUT_MS ?? 15_000),
-      },
-      'New database connection established'
-    );
+    getLogger().debug({ component: 'Database' }, 'New database connection established');
   });
 
   return pool;
