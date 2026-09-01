@@ -4,7 +4,9 @@ import { useGameStore } from '@/stores/gameStore';
 import { getBalance } from '@/api/users';
 
 export function useBalance() {
-  const store = useGameStore();
+  const balance = useGameStore((s) => s.balance);
+  const currency = useGameStore((s) => s.currency);
+  const currencySymbol = useGameStore((s) => s.currencySymbol);
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
@@ -14,21 +16,21 @@ export function useBalance() {
     refetchInterval: 15000,
   });
 
-  // Sync API balance to store
+  // Sync API balance to store — never depend on the whole store object
   useEffect(() => {
     if (data) {
-      store.setBalance(data);
+      useGameStore.getState().setBalance(data);
     }
-  }, [data, store]);
+  }, [data]);
 
   const refreshBalance = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ['balance'] });
   }, [queryClient]);
 
   return {
-    balance: store.balance ?? data?.balance ?? 0,
-    currency: store.currency,
-    currencySymbol: store.currencySymbol,
+    balance: balance ?? data?.balance ?? 0,
+    currency,
+    currencySymbol,
     isLoading,
     error,
     refreshBalance,

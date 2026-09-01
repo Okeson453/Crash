@@ -13,7 +13,11 @@ function createIdempotencyKey(): string {
 }
 
 export function useBet(index: 0 | 1 = 0) {
-  const store = useGameStore();
+  const activeBet = useGameStore((s) => s.activeBets[index]);
+  const isPlacingBet = useGameStore((s) => s.isPlacingBet);
+  const isCashingOut = useGameStore((s) => s.isCashingOut);
+  const betError = useGameStore((s) => s.betError);
+  const cashoutError = useGameStore((s) => s.cashoutError);
   const addToast = useUIStore((s) => s.addToast);
   const queryClient = useQueryClient();
   const { haptic } = useTelegram();
@@ -21,12 +25,14 @@ export function useBet(index: 0 | 1 = 0) {
   const placeBetMutation = useMutation({
     mutationFn: (request: PlaceBetRequest) => placeBet(request, createIdempotencyKey()),
     onMutate: () => {
-      store.setIsPlacingBet(true);
-      store.clearErrors();
+      const s = useGameStore.getState();
+      s.setIsPlacingBet(true);
+      s.clearErrors();
     },
     onSuccess: (bet) => {
-      store.setActiveBet(bet);
-      store.setIsPlacingBet(false);
+      const s = useGameStore.getState();
+      s.setActiveBet(bet);
+      s.setIsPlacingBet(false);
       haptic('notification', 'success');
       addToast({
         type: 'success',
@@ -36,8 +42,9 @@ export function useBet(index: 0 | 1 = 0) {
       void queryClient.invalidateQueries({ queryKey: ['bets'] });
     },
     onError: (error: Error) => {
-      store.setIsPlacingBet(false);
-      store.setBetError(error.message);
+      const s = useGameStore.getState();
+      s.setIsPlacingBet(false);
+      s.setBetError(error.message);
       haptic('notification', 'error');
       addToast({
         type: 'error',
@@ -49,11 +56,12 @@ export function useBet(index: 0 | 1 = 0) {
   const cashoutMutation = useMutation({
     mutationFn: cashoutBet,
     onMutate: () => {
-      store.setIsCashingOut(true);
-      store.clearErrors();
+      const s = useGameStore.getState();
+      s.setIsCashingOut(true);
+      s.clearErrors();
     },
     onSuccess: (result) => {
-      store.setIsCashingOut(false);
+      useGameStore.getState().setIsCashingOut(false);
       haptic('notification', 'success');
       addToast({
         type: 'success',
@@ -63,8 +71,9 @@ export function useBet(index: 0 | 1 = 0) {
       void queryClient.invalidateQueries({ queryKey: ['bets'] });
     },
     onError: (error: Error) => {
-      store.setIsCashingOut(false);
-      store.setCashoutError(error.message);
+      const s = useGameStore.getState();
+      s.setIsCashingOut(false);
+      s.setCashoutError(error.message);
       haptic('notification', 'error');
       addToast({
         type: 'error',
@@ -75,26 +84,26 @@ export function useBet(index: 0 | 1 = 0) {
 
   const place = useCallback(
     (request: PlaceBetRequest) => {
-      if (store.isPlacingBet) return;
+      if (useGameStore.getState().isPlacingBet) return;
       placeBetMutation.mutate(request);
     },
-    [placeBetMutation, store.isPlacingBet]
+    [placeBetMutation]
   );
 
   const cashout = useCallback(
     (betId: string) => {
-      if (store.isCashingOut) return;
+      if (useGameStore.getState().isCashingOut) return;
       cashoutMutation.mutate(betId);
     },
-    [cashoutMutation, store.isCashingOut]
+    [cashoutMutation]
   );
 
   return {
-    activeBet: store.activeBets[index],
-    isPlacingBet: store.isPlacingBet,
-    isCashingOut: store.isCashingOut,
-    betError: store.betError,
-    cashoutError: store.cashoutError,
+    activeBet,
+    isPlacingBet,
+    isCashingOut,
+    betError,
+    cashoutError,
     place,
     cashout,
   };

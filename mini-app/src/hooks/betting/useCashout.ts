@@ -3,31 +3,31 @@ import { useGameStore } from '@/stores/gameStore';
 import { useBet } from './useBet';
 
 export function useCashout(index: 0 | 1 = 0) {
-  const store = useGameStore();
-  const activeBet = store.activeBets[index];
+  const phase = useGameStore((s) => s.phase);
+  const multiplier = useGameStore((s) => s.multiplier);
+  const activeBet = useGameStore((s) => s.activeBets[index]);
+  const isCashingOut = useGameStore((s) => s.isCashingOut);
   const { cashout } = useBet(index);
   const autoCashoutTriggered = useRef(false);
 
-  // Auto-cashout logic
   useEffect(() => {
     if (
-      store.phase === 'running' &&
+      phase === 'running' &&
       activeBet?.state === 'active' &&
       activeBet.autoCashout &&
-      store.multiplier &&
+      multiplier &&
       !autoCashoutTriggered.current
     ) {
-      if (store.multiplier >= activeBet.autoCashout) {
+      if (multiplier >= activeBet.autoCashout) {
         autoCashoutTriggered.current = true;
         cashout(activeBet.id);
       }
     }
 
-    // Reset auto-cashout trigger on new round
-    if (store.phase === 'countdown' || store.phase === 'waiting') {
+    if (phase === 'countdown' || phase === 'waiting') {
       autoCashoutTriggered.current = false;
     }
-  }, [store.phase, store.multiplier, activeBet, cashout]);
+  }, [phase, multiplier, activeBet, cashout]);
 
   const manualCashout = useCallback(() => {
     if (activeBet?.id && activeBet.state === 'active') {
@@ -35,24 +35,18 @@ export function useCashout(index: 0 | 1 = 0) {
     }
   }, [activeBet, cashout]);
 
-  const potentialWin = useCallback(() => {
-    if (!activeBet || !store.multiplier) return 0;
-    return activeBet.amount * store.multiplier;
-  }, [activeBet, store.multiplier]);
-
-  const potentialPnl = useCallback(() => {
-    if (!activeBet || !store.multiplier) return 0;
-    return activeBet.amount * (store.multiplier - 1);
-  }, [activeBet, store.multiplier]);
+  const potentialWin =
+    activeBet && multiplier ? activeBet.amount * multiplier : 0;
+  const potentialPnl =
+    activeBet && multiplier ? activeBet.amount * (multiplier - 1) : 0;
 
   return {
-    canCashout:
-      store.phase === 'running' &&
-      activeBet?.state === 'active',
-    isCashingOut: store.isCashingOut,
+    canCashout: phase === 'running' && activeBet?.state === 'active',
+    isCashingOut,
     manualCashout,
-    potentialWin: potentialWin(),
-    potentialPnl: potentialPnl(),
+    potentialWin,
+    potentialPnl,
     autoCashoutTarget: activeBet?.autoCashout ?? null,
+    activeBet,
   };
 }
