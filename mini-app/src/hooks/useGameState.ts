@@ -1,14 +1,15 @@
-import { useCallback, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useGameStore } from '@/stores/gameStore';
 import { getGameState, getGameConfig, getRecentRounds } from '@/api/game';
 import { wsClient } from '@/api/websocket';
 
-
+/**
+ * Load game state/config/history and wire WebSocket → store.
+ * Use getState() in effects so we never put the whole zustand store in deps
+ * (that re-fires on every state tick and can trigger React #185 max update depth).
+ */
 export function useGameState() {
-  const store = useGameStore();
-
-  // Fetch initial game state
   const { data: initialState } = useQuery({
     queryKey: ['game-state'],
     queryFn: getGameState,
@@ -16,72 +17,72 @@ export function useGameState() {
     refetchInterval: 5000,
   });
 
-  // Fetch game config
   const { data: config } = useQuery({
     queryKey: ['game-config'],
     queryFn: getGameConfig,
     staleTime: Infinity,
   });
 
-  // Fetch recent rounds
   const { data: recentRounds } = useQuery({
     queryKey: ['recent-rounds'],
     queryFn: () => getRecentRounds(20),
     staleTime: 10000,
   });
 
-  // Update store when initial data loads
   useEffect(() => {
     if (initialState) {
-      store.setGameState(initialState);
+      useGameStore.getState().setGameState(initialState);
     }
-  }, [initialState, store]);
+  }, [initialState]);
 
   useEffect(() => {
     if (config) {
-      store.setGameConfig(config);
+      useGameStore.getState().setGameConfig(config);
     }
-  }, [config, store]);
+  }, [config]);
 
   useEffect(() => {
     if (recentRounds) {
+      const { addRoundHistory } = useGameStore.getState();
       recentRounds.forEach((round) => {
-        store.addRoundHistory({
+        addRoundHistory({
           roundId: round.id,
           crashPoint: round.crashPoint,
           timestamp: round.crashedAt || round.startedAt,
         });
       });
     }
-  }, [recentRounds, store]);
+  }, [recentRounds]);
 
-  // Subscribe to WebSocket events
   useEffect(() => {
     const unsubState = wsClient.onGameState((event) => {
-      store.setGameState(event.state);
+      useGameStore.getState().setGameState(event.state);
     });
 
     const unsubMultiplier = wsClient.onMultiplier((event) => {
-      store.setMultiplier(event.multiplier);
+      useGameStore.getState().setMultiplier(event.multiplier);
     });
 
     const unsubRoundStart = wsClient.onRoundStart((event) => {
-      store.setPhase('countdown');
-      store.setCountdown(event.countdownSeconds);
-      store.resetForNewRound();
+      const s = useGameStore.getState();
+      s.setPhase('countdown');
+      s.setCountdown(event.countdownSeconds);
+      s.resetForNewRound();
     });
 
     const unsubCountdown = wsClient.onCountdown((event) => {
-      store.setCountdown(event.secondsRemaining);
+      const s = useGameStore.getState();
+      s.setCountdown(event.secondsRemaining);
       if (event.secondsRemaining <= 0) {
-        store.setPhase('running');
+        s.setPhase('running');
       }
     });
 
     const unsubRoundEnd = wsClient.onRoundEnd((event) => {
-      store.setPhase('crashed');
-      store.setMultiplier(event.crashPoint);
-      store.addRoundHistory({
+      const s = useGameStore.getState();
+      s.setPhase('crashed');
+      s.setMultiplier(event.crashPoint);
+      s.addRoundHistory({
         roundId: event.roundId,
         crashPoint: event.crashPoint,
         timestamp: new Date().toISOString(),
@@ -95,43 +96,5 @@ export function useGameState() {
       unsubCountdown();
       unsubRoundEnd();
     };
-  }, [store]);
-
-  const canPlaceBet = useCallback(() => {
-    return (
-      store.phase === 'waiting' ||
-      store.phase === 'countdown'
-    );
-  }, [store.phase]);
-
-  const canCashout = useCallback(() => {
-    return (
-      store.phase === 'running' &&
-      store.activeBet !== null &&
-      store.activeBet.state === 'active'
-    );
-  }, [store.phase, store.activeBet]);
-
-  return {
-    phase: store.phase,
-    roundId: store.roundId,
-    multiplier: store.multiplier,
-    countdownSeconds: store.countdownSeconds,
-    crashPoint: store.crashPoint,
-    config: store.config,
-    activeBet: store.activeBet,
-    roundHistory: store.roundHistory,
-    liveFeed: store.liveFeed,
-    isPlacingBet: store.isPlacingBet,
-    isCashingOut: store.isCashingOut,
-    betError: store.betError,
-    cashoutError: store.cashoutError,
-    canPlaceBet,
-    canCashout,
-    setIsPlacingBet: store.setIsPlacingBet,
-    setIsCashingOut: store.setIsCashingOut,
-    setBetError: store.setBetError,
-    setCashoutError: store.setCashoutError,
-    clearErrors: store.clearErrors,
-  };
+  }, []);
 }

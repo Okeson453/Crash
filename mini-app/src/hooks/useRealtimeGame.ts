@@ -4,12 +4,15 @@ import { wsClient } from '@/api/websocket';
 import { useUIStore } from '@/stores/uiStore';
 import { playSound } from '@/lib/sound';
 
+/**
+ * Realtime bet/cashout/balance feed. Uses getState() to avoid effect loops (React #185).
+ */
 export function useRealtimeGame() {
-  const store = useGameStore();
   const addToast = useUIStore((s) => s.addToast);
 
   useEffect(() => {
     const unsubBetPlaced = wsClient.onBetPlaced((event) => {
+      const store = useGameStore.getState();
       store.setActiveBet(event.bet);
       playSound('bet-placed');
       store.addLiveFeedItem({
@@ -23,6 +26,7 @@ export function useRealtimeGame() {
     });
 
     const unsubBetCashedOut = wsClient.onBetCashedOut((event) => {
+      const store = useGameStore.getState();
       playSound('cashout');
       if (store.activeBet?.id === event.betId) {
         store.setActiveBet({
@@ -47,10 +51,16 @@ export function useRealtimeGame() {
       });
     });
 
-    const unsubRoundEnd = wsClient.onRoundEnd((event) => { playSound('crash'); if (store.activeBet?.state === 'cashed_out') playSound('win-jingle'); void event; });
+    const unsubRoundEnd = wsClient.onRoundEnd((event) => {
+      playSound('crash');
+      if (useGameStore.getState().activeBet?.state === 'cashed_out') {
+        playSound('win-jingle');
+      }
+      void event;
+    });
 
     const unsubBalance = wsClient.onBalanceUpdate((event) => {
-      store.updateBalance(event.balance);
+      useGameStore.getState().updateBalance(event.balance);
     });
 
     const unsubError = wsClient.onSystemError((event) => {
@@ -67,5 +77,5 @@ export function useRealtimeGame() {
       unsubRoundEnd();
       unsubError();
     };
-  }, [store, addToast]);
+  }, [addToast]);
 }
